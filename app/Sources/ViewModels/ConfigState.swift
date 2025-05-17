@@ -1,7 +1,11 @@
 import SwiftUI
 
 class ConfigState: ObservableObject {
-    @Published var adbPath: String = StorageManager.loadADBPath() ?? ""
+    @Published var adbPath: String = StorageManager.loadADBPath() ?? "" {
+        didSet {
+            StorageManager.saveADBPath(adbPath)
+        }
+    }
     @Published var appIdentifier: String = StorageManager.loadAppIdentifier()
     @Published var showingADBPicker = false
     /// Whether manual device selector is enabled (show device dropdown).
@@ -13,7 +17,32 @@ class ConfigState: ObservableObject {
     weak var appState: AppState?
     
     init() {
-        // Initialization of other properties happens via defaults or direct assignment
+        // Auto-detect adb path if none saved
+        if adbPath.isEmpty, let detected = ConfigState.detectADBPath() {
+            adbPath = detected
+        }
+    }
+
+    /// Attempts to locate adb via `which adb` and returns its path if found.
+    private static func detectADBPath() -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+        process.arguments = ["adb"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            if let path = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines), !path.isEmpty {
+                return path
+            }
+        } catch {
+            print("⚠️ Failed to detect adb path: \(error.localizedDescription)")
+        }
+        return nil
     }
     
     func saveAppIdentifier() {

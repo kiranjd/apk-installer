@@ -3,7 +3,7 @@
 # Configuration
 APP_NAME="DevTools"
 TEAM_ID="Z4P2STPJXW"
-CERT_FILE="Certificates_JD.p12"
+CERT_FILE="config/Certificates_JD.p12"
 CERT_PASSWORD="1234"
 
 # Colors for output

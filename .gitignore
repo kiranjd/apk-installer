@@ -1,3 +1,4 @@
 # Ignore build artifacts directory and macOS system files
 build/
 .DS_Store
+DevTools.dmg
