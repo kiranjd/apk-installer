@@ -1,6 +1,6 @@
 import Foundation
 
-struct APKFile: Identifiable {
+struct APKFile: Identifiable, Equatable {
     let id = UUID()
     let name: String
     let path: String

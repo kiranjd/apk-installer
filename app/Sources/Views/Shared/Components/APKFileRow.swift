@@ -47,134 +47,241 @@ struct APKFileRow: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: ViewConstants.secondarySpacing) {
-            HStack {
-                Text(file.name)
-                    .font(.system(.body, design: .rounded, weight: .medium))
-                    .foregroundColor(.primary)
-                    .lineLimit(1)
-                
-                Spacer()
-                
-                TimelineView(.periodic(from: .now, by: 60)) { context in
-                    let now = context.date
-                    Text(now.timeIntervalSince(file.modificationDate) < 60
-                         ? "just now"
-                         : file.modificationDate.formatted(.relative(presentation: .named)))
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
+            // Top line: APK filename (full width)
+            Text(file.name)
+                .font(.system(size: 14, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .foregroundColor(.primary)
+                .help(file.name)
+                .frame(maxWidth: .infinity, alignment: .leading)
             
+            // Bottom line: Size, modification date, and action buttons
             HStack {
-                Text(ByteCountFormatter.string(fromByteCount: file.size, countStyle: .file))
+                Text("\(ByteCountFormatter.string(fromByteCount: file.size, countStyle: .file))")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                Text("·")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                Text("\(RelativeDateTimeFormatter().localizedString(for: file.modificationDate, relativeTo: Date()))")
                     .font(.caption)
                     .foregroundColor(.secondary)
                 
                 Spacer()
                 
+                // Action buttons
                 HStack(spacing: ViewConstants.secondarySpacing) {
-                    Button {
-                    Task {
-                            isInstallTaskRunning = true
-                            animatingGradient = true
-                            statusViewModel.showMessage("Installing \(file.name)...", type: .progress)
-                            defer {
-                                isInstallTaskRunning = false
-                                animatingGradient = false
+                    if isHovered {
+                        // Show full action menu on hover
+                        ActionButtonWithLabel(
+                            icon: "square.and.arrow.down",
+                            label: "Install",
+                            isRunning: isInstallTaskRunning,
+                            isDeviceConnected: !deviceState.devices.isEmpty,
+                            showLabel: true,
+                            action: {
+                                installAPK(isUpdate: false)
                             }
-                            // Determine target device: prompt if auto mode and multiple devices
-                            var targetDevice = deviceState.selectedDeviceID
-                            if !configState.deviceSelectorEnabled && deviceState.devices.count > 1 {
-                                if let chosen = promptForDevice(devices: deviceState.devices) {
-                                    targetDevice = chosen
-                                } else {
-                                    // Canceled; abort install
-                                    return
+                        )
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        
+                        ActionButtonWithLabel(
+                            icon: "arrow.triangle.2.circlepath", 
+                            label: "Update",
+                            isRunning: isInstallTaskRunning,
+                            isDeviceConnected: !deviceState.devices.isEmpty,
+                            showLabel: true,
+                            action: {
+                                installAPK(isUpdate: true)
+                            }
+                        )
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        
+                        ActionButtonWithLabel(
+                            icon: "folder",
+                            label: "Open",
+                            isRunning: false,
+                            isDeviceConnected: true, // Always enabled
+                            showLabel: true,
+                            action: {
+                                NSWorkspace.shared.selectFile(file.path, inFileViewerRootedAtPath: "")
+                            }
+                        )
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    } else {
+                        // Show discoverable ellipsis button when not hovered
+                        Button(action: {}) {
+                            Image(systemName: "ellipsis")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(.secondary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background {
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(Color.secondary.opacity(0.1))
                                 }
-                            }
-                            do {
-                                try await ShellCommand.installAPK(path: file.path,
-                                                                  isUpdate: false,
-                                                                  device: targetDevice)
-                                statusViewModel.showMessage("Successfully installed \(file.name)", type: .success)
-                            } catch {
-                                statusViewModel.showMessage("Failed to install \(file.name): \(error.localizedDescription)", type: .error)
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "square.and.arrow.down")
-                            .frame(width: ViewConstants.iconSize)
-                    }
-                    .help("Install APK with test flag")
-                    .disabled(isInstallTaskRunning)
-                    
-                    Button {
-                    Task {
-                            isInstallTaskRunning = true
-                            animatingGradient = true
-                            statusViewModel.showMessage("Updating \(file.name)...", type: .progress)
-                            defer {
-                                isInstallTaskRunning = false
-                                animatingGradient = false
-                            }
-                            // Determine target device: prompt if auto mode and multiple devices
-                            var targetDevice = deviceState.selectedDeviceID
-                            if !configState.deviceSelectorEnabled && deviceState.devices.count > 1 {
-                                if let chosen = promptForDevice(devices: deviceState.devices) {
-                                    targetDevice = chosen
-                                } else {
-                                    // Canceled; abort update
-                                    return
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
                                 }
-                            }
-                            do {
-                                try await ShellCommand.installAPK(path: file.path,
-                                                                  isUpdate: true,
-                                                                  device: targetDevice)
-                                statusViewModel.showMessage("Successfully updated \(file.name)", type: .success)
-                            } catch {
-                                statusViewModel.showMessage("Failed to update \(file.name): \(error.localizedDescription)", type: .error)
-                            }
                         }
-                    } label: {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .frame(width: ViewConstants.iconSize)
+                        .buttonStyle(.plain)
+                        .help("Hover to see available actions")
+                        .opacity(isInstallTaskRunning ? 0.5 : 0.7)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                        
+                        // Invisible spacers to maintain consistent height
+                        Spacer()
+                            .frame(width: 0)
+                        Spacer()
+                            .frame(width: 0)
                     }
-                    .help("Update existing app")
-                    .disabled(isInstallTaskRunning)
-                    
-                    Button {
-                        NSWorkspace.shared.selectFile(file.path, inFileViewerRootedAtPath: "")
-                    } label: {
-                        Image(systemName: "folder")
-                            .frame(width: ViewConstants.iconSize)
-                    }
-                    .help("Show in Finder")
                 }
-                .buttonStyle(HoverButtonStyle())
-                .font(.system(size: 13, weight: .medium))
-                .foregroundColor(.secondary)
-                .opacity(isHovered ? 1 : (isInstallTaskRunning ? 0.5 : 0))
+                .frame(height: 28) // Fixed height to prevent card height changes
+                .animation(.easeInOut(duration: 0.25), value: isHovered) // Slightly longer for smoother transitions
             }
         }
         .padding(.horizontal, ViewConstants.primarySpacing)
-        .padding(.vertical, ViewConstants.secondarySpacing)
+        .padding(.vertical, ViewConstants.secondarySpacing + 3)
         .background {
             RoundedRectangle(cornerRadius: ViewConstants.cornerRadius)
-                .fill(isInstallTaskRunning ? (animatingGradient ? installingGradient : idleGradient) : idleGradient)
+                .fill(
+                    isInstallTaskRunning ? (animatingGradient ? installingGradient : idleGradient) : 
+                    isHovered ? 
+                        LinearGradient(gradient: Gradient(colors: [Color.blue.opacity(0.08), Color.blue.opacity(0.04)]), startPoint: .topLeading, endPoint: .bottomTrailing) :
+                        idleGradient
+                )
                 .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
-                .animation(isInstallTaskRunning ? .easeInOut(duration: 0.7).repeatForever(autoreverses: true) : .default, value: animatingGradient)
+                .animation(isInstallTaskRunning ? .easeInOut(duration: 0.7).repeatForever(autoreverses: true) : .easeInOut(duration: 0.2), value: animatingGradient)
+                .animation(.easeInOut(duration: 0.2), value: isHovered)
         }
         .onHover { hovering in
-            if !isInstallTaskRunning {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isHovered = hovering
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isHovered = hovering && !isInstallTaskRunning
+            }
+        }
+    }
+    
+    // MARK: - Action Button with Hover Label
+    
+    private struct ActionButtonWithLabel: View {
+        let icon: String
+        let label: String
+        let isRunning: Bool
+        let isDeviceConnected: Bool
+        let showLabel: Bool
+        let action: () -> Void
+        @State private var isButtonHovered = false
+        
+        private var isDisabled: Bool {
+            !isDeviceConnected || isRunning
+        }
+        
+        private var tooltipText: String {
+            if !isDeviceConnected && (label == "Install" || label == "Update") {
+                return "Connect a device via ADB to \(label.lowercased()) APK"
+            }
+            return label
+        }
+        
+        var body: some View {
+            Button(action: action) {
+                HStack(spacing: 4) {
+                    // Show warning icon when device not connected
+                    if !isDeviceConnected && (label == "Install" || label == "Update") && showLabel {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.orange)
+                    }
+                    
+                    Image(systemName: icon)
+                        .font(.system(size: 12, weight: .medium))
+                    
+                    if showLabel {
+                        Text(label)
+                            .font(.caption2)
+                            .fontWeight(.medium)
+                            .transition(.opacity.combined(with: .move(edge: .leading)))
+                    }
+                }
+                .foregroundColor(
+                    isDisabled ? .secondary.opacity(0.6) :
+                    isButtonHovered ? .white : .secondary
+                )
+                .padding(.horizontal, showLabel ? 8 : 6)
+                .padding(.vertical, 6)
+                .frame(minHeight: 28)
+                .background {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(
+                            isDisabled ? Color.secondary.opacity(0.1) :
+                            isButtonHovered ? Color.blue : Color.clear
+                        )
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(
+                            isDisabled ? Color.secondary.opacity(0.2) :
+                            isButtonHovered ? Color.blue : Color.secondary.opacity(0.3),
+                            lineWidth: 1
+                        )
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(isDisabled)
+            .opacity(isDisabled ? 0.6 : 1.0)
+            .help(tooltipText)
+            .onHover { hovering in
+                if !isDisabled {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        isButtonHovered = hovering
+                    }
                 }
             }
         }
     }
-}
-
+    
+    // MARK: - Helper Methods
+    
+    private func installAPK(isUpdate: Bool) {
+        Task {
+            isInstallTaskRunning = true
+            animatingGradient = true
+            statusViewModel.showMessage("\(isUpdate ? "Updating" : "Installing") \(file.name)...", type: .progress)
+            defer {
+                isInstallTaskRunning = false
+                animatingGradient = false
+                // Force reset hover state when installation completes
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isHovered = false
+                }
+            }
+            
+            // Determine target device: prompt if auto mode and multiple devices
+            var targetDevice = deviceState.selectedDeviceID
+            if !configState.deviceSelectorEnabled && deviceState.devices.count > 1 {
+                if let chosen = promptForDevice(devices: deviceState.devices) {
+                    targetDevice = chosen
+                } else {
+                    // Canceled; abort install
+                    return
+                }
+            }
+            
+            do {
+                try await ShellCommand.installAPK(path: file.path,
+                                                  isUpdate: isUpdate,
+                                                  device: targetDevice)
+                statusViewModel.showMessage("Successfully \(isUpdate ? "updated" : "installed") \(file.name)", type: .success)
+            } catch {
+                statusViewModel.showMessage("Failed to \(isUpdate ? "update" : "install") \(file.name): \(error.localizedDescription)", type: .error)
+            }
+        }
+    }
+    
     /// Prompts the user to select one of multiple connected devices.
     private func promptForDevice(devices: [ADBDevice]) -> String? {
         let alert = NSAlert()
@@ -193,6 +300,7 @@ struct APKFileRow: View {
         }
         return nil
     }
+}
 
 #Preview {
     let exampleFile = APKFile(name: "ExampleApp.apk", path: "/Users/test/app.apk", size: 12345678, modificationDate: .now)
