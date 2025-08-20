@@ -56,8 +56,8 @@ struct APKFileRow: View {
                 .help(file.name)
                 .frame(maxWidth: .infinity, alignment: .leading)
             
-            // Bottom line: Size, modification date, and action buttons
-            HStack {
+            // Bottom line: Size, modification date, and action menu
+            HStack(alignment: .center) {
                 Text("\(ByteCountFormatter.string(fromByteCount: file.size, countStyle: .file))")
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -71,11 +71,10 @@ struct APKFileRow: View {
                     .foregroundColor(.secondary)
                 
                 Spacer()
-                
-                // Action buttons
+
+                // Action buttons area, restoring original layout. Replace Open with three-dots menu.
                 HStack(spacing: ViewConstants.secondarySpacing) {
                     if isHovered {
-                        // Show full action menu on hover
                         ActionButtonWithLabel(
                             icon: "square.and.arrow.down",
                             label: "Install",
@@ -87,9 +86,9 @@ struct APKFileRow: View {
                             }
                         )
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
-                        
+
                         ActionButtonWithLabel(
-                            icon: "arrow.triangle.2.circlepath", 
+                            icon: "arrow.triangle.2.circlepath",
                             label: "Update",
                             isRunning: isInstallTaskRunning,
                             isDeviceConnected: !deviceState.devices.isEmpty,
@@ -99,16 +98,13 @@ struct APKFileRow: View {
                             }
                         )
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
-                        
-                        ActionButtonWithLabel(
-                            icon: "folder",
-                            label: "Open",
-                            isRunning: false,
-                            isDeviceConnected: true, // Always enabled
-                            showLabel: true,
-                            action: {
-                                NSWorkspace.shared.selectFile(file.path, inFileViewerRootedAtPath: "")
-                            }
+
+                        MoreMenuButton(
+                            isRunning: isInstallTaskRunning,
+                            isDeviceConnected: true,
+                            onCopy: { copyAPKToClipboard() },
+                            onClear: { clearStorageForAPK() },
+                            onReveal: { NSWorkspace.shared.selectFile(file.path, inFileViewerRootedAtPath: "") }
                         )
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                     } else {
@@ -132,7 +128,7 @@ struct APKFileRow: View {
                         .help("Hover to see available actions")
                         .opacity(isInstallTaskRunning ? 0.5 : 0.7)
                         .transition(.opacity.combined(with: .move(edge: .top)))
-                        
+
                         // Invisible spacers to maintain consistent height
                         Spacer()
                             .frame(width: 0)
@@ -140,8 +136,8 @@ struct APKFileRow: View {
                             .frame(width: 0)
                     }
                 }
-                .frame(height: 28) // Fixed height to prevent card height changes
-                .animation(.easeInOut(duration: 0.25), value: isHovered) // Slightly longer for smoother transitions
+                .frame(height: 28)
+                .animation(.easeInOut(duration: 0.25), value: isHovered)
             }
         }
         .padding(.horizontal, ViewConstants.primarySpacing)
@@ -278,6 +274,94 @@ struct APKFileRow: View {
                 statusViewModel.showMessage("Successfully \(isUpdate ? "updated" : "installed") \(file.name)", type: .success)
             } catch {
                 statusViewModel.showMessage("Failed to \(isUpdate ? "update" : "install") \(file.name): \(error.localizedDescription)", type: .error)
+            }
+        }
+    }
+
+    // MARK: - Three-dots menu button (replaces Open)
+    private struct MoreMenuButton: View {
+        let isRunning: Bool
+        let isDeviceConnected: Bool
+        let onCopy: () -> Void
+        let onClear: () -> Void
+        let onReveal: () -> Void
+        @State private var isButtonHovered = false
+
+        var body: some View {
+            Menu {
+                Button(action: onCopy) {
+                    Label("Copy APK", systemImage: "doc.on.doc")
+                }
+                Button(action: onClear) {
+                    Label("Clear Storage", systemImage: "trash")
+                }
+                .disabled(!isDeviceConnected)
+                Divider()
+                Button(action: onReveal) {
+                    Label("Show in Finder", systemImage: "folder")
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .foregroundColor(
+                    isRunning ? .secondary.opacity(0.6) :
+                    isButtonHovered ? .white : .secondary
+                )
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(
+                            isRunning ? Color.secondary.opacity(0.1) :
+                            isButtonHovered ? Color.blue : Color.clear
+                        )
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(
+                            isRunning ? Color.secondary.opacity(0.2) :
+                            isButtonHovered ? Color.blue : Color.secondary.opacity(0.3),
+                            lineWidth: 1
+                        )
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(isRunning)
+            .onHover { hovering in
+                if !isRunning {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        isButtonHovered = hovering
+                    }
+                }
+            }
+        }
+    }
+
+    private func copyAPKToClipboard() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        let url = URL(fileURLWithPath: file.path)
+        pasteboard.writeObjects([url as NSURL])
+        statusViewModel.showMessage("Copied APK to clipboard: \(file.name)", type: .info)
+    }
+
+    private func clearStorageForAPK() {
+        Task {
+            // Determine package id from APK; fallback to configured identifier
+            let pkgId: String
+            do {
+                pkgId = try await ShellCommand.getPackageIdentifier(from: file.path)
+            } catch {
+                pkgId = StorageManager.loadAppIdentifier()
+            }
+            let targetDevice = deviceState.selectedDeviceID
+            do {
+                _ = try await ShellCommand.clearAppData(identifier: pkgId, device: targetDevice)
+                statusViewModel.showMessage("Cleared app data for \(pkgId)", type: .success)
+            } catch {
+                statusViewModel.showMessage("Failed to clear app data for \(pkgId): \(error.localizedDescription)", type: .error)
             }
         }
     }

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct StatusBarView: View {
     @ObservedObject var viewModel: StatusViewModel
+    @State private var now: Date = Date()
 
     var body: some View {
         // Wrap the conditional view in a Group
@@ -27,6 +28,12 @@ struct StatusBarView: View {
                         .foregroundColor(.primary)
                         .lineLimit(1)
                         .help(viewModel.message)
+
+                    if let ts = viewModel.timestamp, viewModel.statusType != .progress {
+                        Text(RelativeDateTimeFormatter().localizedString(for: ts, relativeTo: now))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                     
                     // Optional: Show percentage if progress is available (even with spinner)
                     if viewModel.statusType == .progress, let progress = viewModel.progress {
@@ -39,19 +46,13 @@ struct StatusBarView: View {
 
                     // Always reserve space for dismiss button to maintain consistent height
                     Group {
-                        if viewModel.statusType != .success {
-                            Button {
-                                viewModel.hide()
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.secondary.opacity(0.7))
-                            }
-                            .buttonStyle(.plain)
-                        } else {
-                            // Invisible spacer with same size as dismiss button for consistent layout
+                        Button {
+                            viewModel.hide()
+                        } label: {
                             Image(systemName: "xmark.circle.fill")
-                                .foregroundColor(.clear)
+                                .foregroundColor(.secondary.opacity(0.7))
                         }
+                        .buttonStyle(.plain)
                     }
                     .frame(width: 16, height: 16) // Consistent button area size
                 }
@@ -73,6 +74,9 @@ struct StatusBarView: View {
         }
         // Animate the appearance/disappearance based on isVisible, applied to the Group
         .animation(.easeOut(duration: 0.3), value: viewModel.isVisible)
+        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { tick in
+            now = tick
+        }
     }
 
     private var iconName: String {

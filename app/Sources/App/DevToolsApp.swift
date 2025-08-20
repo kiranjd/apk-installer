@@ -12,6 +12,7 @@ struct DevToolsApp: App {
                 .environmentObject(statusViewModel)
         }
         .windowStyle(.hiddenTitleBar)
-        .windowResizability(.contentSize)
+        .defaultSize(width: 1100, height: 640)
+        .windowResizability(.automatic)
     }
 }

@@ -14,6 +14,7 @@ class StatusViewModel: ObservableObject {
     @Published var message: String = ""
     @Published var statusType: StatusType = .info
     @Published var progress: Double? = nil // Optional progress for progress type
+    @Published var timestamp: Date? = nil  // When the message was shown
     
     private var autoDismissTask: Task<Void, Never>?
 
@@ -24,6 +25,7 @@ class StatusViewModel: ObservableObject {
         self.message = message
         self.statusType = type
         self.progress = progress
+        self.timestamp = Date()
         
         // Always ensure visibility when showing a new message
         if !isVisible {
@@ -35,15 +37,7 @@ class StatusViewModel: ObservableObject {
             self.progress = nil
         }
         
-        // Auto-dismiss success messages after 3 seconds
-        if type == .success {
-            autoDismissTask = Task {
-                try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
-                if !Task.isCancelled {
-                    hide()
-                }
-            }
-        }
+        // Do not auto-dismiss; keep visible until user dismisses
     }
     
     func updateProgress(_ progress: Double) {
@@ -59,7 +53,8 @@ class StatusViewModel: ObservableObject {
         isVisible = false
         progress = nil // Reset progress when hiding
         // Clear message on hide to prevent showing stale text briefly on next show
-        message = "" 
+        message = ""
+        timestamp = nil
     }
     
     deinit {

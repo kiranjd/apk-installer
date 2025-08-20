@@ -130,7 +130,7 @@ struct InstallAPKView: View {
         @State private var directoryMonitor: DirectoryMonitor?
         
         var body: some View {
-            HStack {
+            HStack(alignment: .center, spacing: ViewConstants.secondarySpacing) {
                 Picker("Location", selection: $state.selectedLocation) {
                     Text("ℹ️ Select or add a location with APKs")
                         .tag(Optional<APKLocation>.none)
@@ -153,7 +153,7 @@ struct InstallAPKView: View {
                 .buttonStyle(.plain)
                 .help("Add a new folder location")
 
-                // Refresh the APK list for the currently selected folder.
+                // Manual refresh button; removed auto-reload and change notifications.
                 Button {
                     if let path = state.selectedLocation?.path {
                         state.scanError = nil
@@ -230,32 +230,13 @@ struct InstallAPKView: View {
                 }
             }
             .onChange(of: state.selectedLocation) { newLocation in
-                directoryMonitor?.stop()
-                directoryMonitor = nil
                 if let location = newLocation {
                     state.scanError = nil
                     checkPermission(location.path)
-                    let url = URL(fileURLWithPath: location.path)
-                    let monitor = DirectoryMonitor(url: url)
-                    monitor.start {
-                        DispatchQueue.main.async {
-                            statusViewModel.showMessage(
-                                "Folder content changed. Reloading APK list...",
-                                type: .info
-                            )
-                            state.scanError = nil
-                            checkPermission(location.path)
-                        }
-                    }
-                    directoryMonitor = monitor
                 } else {
                     state.apkFiles = []
                 }
                 StorageManager.saveLastSelectedLocation(newLocation)
-            }
-            .onDisappear {
-                directoryMonitor?.stop()
-                directoryMonitor = nil
             }
         }
     }

@@ -112,6 +112,19 @@ enum ShellCommand {
             .joined(separator: " ")
         return try await execute(cmd)
     }
+
+    /// Clears app data for a given package identifier on the connected device.
+    /// - Parameters:
+    ///   - identifier: The Android package name whose data should be cleared.
+    ///   - device: Optional device identifier to target with `-s`.
+    /// - Returns: Shell output from the command.
+    static func clearAppData(identifier: String, device: String? = nil) async throws -> String {
+        let deviceOption = device.map { "-s \($0)" } ?? ""
+        let cmd = ["adb", deviceOption, "shell", "pm", "clear", identifier]
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        return try await execute(cmd)
+    }
     
     static func checkBundleExists(at path: String, platform: BundlePlatform) throws -> Bool {
         let fileManager = Foundation.FileManager.default
@@ -198,5 +211,34 @@ enum ShellCommand {
                          userInfo: [NSLocalizedDescriptionKey: "Failed to execute script"])
         }
         return output
+    }
+
+    /// Attempts to detect the full path to the `adb` executable by searching the PATH
+    /// and common install locations, using the same environment as our shell executor.
+    static func detectADBPath() async -> String? {
+        // Try shell-based resolution first so PATH (with ANDROID_HOME/platform-tools) is honored
+        if let resolved = try? await execute("command -v adb || which adb"),
+           let firstLine = resolved.split(separator: "\n").first {
+            let candidate = String(firstLine).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !candidate.isEmpty, FileManager.default.isExecutableFile(atPath: candidate) {
+                return candidate
+            }
+        }
+
+        // Fallbacks
+        var env = ProcessInfo.processInfo.environment
+        let androidHome = env["ANDROID_HOME"] ?? "\(NSHomeDirectory())/Library/Android/sdk"
+        let candidates = [
+            "\(androidHome)/platform-tools/adb",
+            "/opt/homebrew/bin/adb",
+            "/usr/local/bin/adb",
+            "/usr/bin/adb"
+        ]
+        for path in candidates {
+            if FileManager.default.isExecutableFile(atPath: path) {
+                return path
+            }
+        }
+        return nil
     }
 } 

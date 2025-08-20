@@ -17,10 +17,7 @@ class ConfigState: ObservableObject {
     weak var appState: AppState?
     
     init() {
-        // Auto-detect adb path if none saved
-        if adbPath.isEmpty, let detected = ConfigState.detectADBPath() {
-            adbPath = detected
-        }
+        // Defer ADB path detection to runtime (e.g., when opening Config or listing devices).
     }
 
     /// Attempts to locate adb via `which adb` and returns its path if found.

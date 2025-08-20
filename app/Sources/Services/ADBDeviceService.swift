@@ -36,37 +36,24 @@ public struct ADBDevice: Identifiable, Equatable {
 public enum ADBDeviceService {
     /// Runs `adb devices -l`, parses the output, and returns device info.
     public static func listDevices() async throws -> [ADBDevice] {
-        let adbPath = StorageManager.loadADBPath() ?? "adb"
-        let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: adbPath)
-        process.arguments = ["devices", "-l"]
-
-        var env = ProcessInfo.processInfo.environment
-        let androidHome = env["ANDROID_HOME"] ?? "\(NSHomeDirectory())/Library/Android/sdk"
-        env["PATH"] = [
-            "/usr/local/bin",
-            "/opt/homebrew/bin",
-            "/usr/bin",
-            "\(androidHome)/platform-tools",
-            "\(androidHome)/tools",
-            "\(androidHome)/tools/bin",
-            env["PATH"] ?? ""
-        ].joined(separator: ":")
-        process.environment = env
-
-        process.standardOutput = pipe
-        process.standardError = pipe
-        try process.run()
-        process.waitUntilExit()
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let output = String(data: data, encoding: .utf8) ?? ""
-        if process.terminationStatus != 0 {
-            throw NSError(domain: "ADBDeviceService",
-                          code: Int(process.terminationStatus),
-                          userInfo: [NSLocalizedDescriptionKey: output])
+        // Determine how to invoke adb
+        var adbInvocation: String
+        if let saved = StorageManager.loadADBPath(),
+           FileManager.default.isExecutableFile(atPath: saved) {
+            adbInvocation = "'\(saved)'"
+        } else {
+            // Try to auto-detect and persist the adb path using the shell environment
+            if let detected = await ShellCommand.detectADBPath() {
+                StorageManager.saveADBPath(detected)
+                adbInvocation = "'\(detected)'"
+            } else {
+                // Fall back to PATH and rely on the shell to resolve adb
+                adbInvocation = "adb"
+            }
         }
+
+        // Run via our shell executor so PATH and ANDROID_HOME are respected
+        let output = try await ShellCommand.execute("\(adbInvocation) devices -l")
 
         var devices: [ADBDevice] = []
         for line in output.split(separator: "\n").map(String.init) {

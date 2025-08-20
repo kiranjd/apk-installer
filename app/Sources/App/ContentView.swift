@@ -8,9 +8,10 @@ struct ContentView: View {
     @State private var selection: Int? = 0
     @State private var showingPermissionAlert = false
     @State private var permissionAlertMessage = ""
+    @State private var sidebarVisibility: NavigationSplitViewVisibility = .detailOnly
     
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $sidebarVisibility) {
             List(selection: $selection) {
                 NavigationLink(value: 0) {
                     Label("Install APK", systemImage: "square.and.arrow.down.fill")
