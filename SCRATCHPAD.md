@@ -39,3 +39,5 @@
 - UX guardrail: when user taps cancel on install/update, stop row flashing animation immediately (don’t wait for ADB command teardown).
 - Core-path guardrail: install/update pipeline must hard-timeout and fail fast (120s budget) rather than chaining optional waits indefinitely.
 - Core-path guardrail: never preflight every adb command with `adb start-server`; execute target adb command directly to avoid daemon-bootstrap hangs blocking install/update.
+
+- Test guardrail: set `APKINSTALLER_SKIP_POST_INSTALL_LAUNCH=1` in integration/e2e tests to avoid detached best-effort launch leaking across tests.

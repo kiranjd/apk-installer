@@ -10,6 +10,7 @@ final class ADBServiceIntegrationSmokeTests: XCTestCase {
         defer {
             unsetenv("ADB_LOG_FILE")
             unsetenv("APKINSTALLER_ADB_PATH_OVERRIDE")
+            unsetenv("APKINSTALLER_SKIP_POST_INSTALL_LAUNCH")
             unsetenv("ANDROID_HOME")
             unsetenv("ANDROID_SDK_ROOT")
             try? FileManager.default.removeItem(at: tempDir)
@@ -64,6 +65,7 @@ final class ADBServiceIntegrationSmokeTests: XCTestCase {
 
         setenv("ADB_LOG_FILE", logFile.path, 1)
         setenv("APKINSTALLER_ADB_PATH_OVERRIDE", adbFile.path, 1)
+        setenv("APKINSTALLER_SKIP_POST_INSTALL_LAUNCH", "1", 1)
         setenv("ANDROID_HOME", tempDir.path, 1)
         setenv("ANDROID_SDK_ROOT", tempDir.path, 1)
 
@@ -93,6 +95,7 @@ final class ADBServiceIntegrationSmokeTests: XCTestCase {
         defer {
             unsetenv("ADB_LOG_FILE")
             unsetenv("APKINSTALLER_ADB_PATH_OVERRIDE")
+            unsetenv("APKINSTALLER_SKIP_POST_INSTALL_LAUNCH")
             unsetenv("ANDROID_HOME")
             unsetenv("ANDROID_SDK_ROOT")
             try? FileManager.default.removeItem(at: tempDir)
@@ -147,6 +150,7 @@ final class ADBServiceIntegrationSmokeTests: XCTestCase {
 
         setenv("ADB_LOG_FILE", logFile.path, 1)
         setenv("APKINSTALLER_ADB_PATH_OVERRIDE", adbFile.path, 1)
+        setenv("APKINSTALLER_SKIP_POST_INSTALL_LAUNCH", "1", 1)
         setenv("ANDROID_HOME", tempDir.path, 1)
         setenv("ANDROID_SDK_ROOT", tempDir.path, 1)
 
@@ -169,6 +173,7 @@ final class ADBServiceIntegrationSmokeTests: XCTestCase {
         defer {
             unsetenv("ADB_LOG_FILE")
             unsetenv("APKINSTALLER_ADB_PATH_OVERRIDE")
+            unsetenv("APKINSTALLER_SKIP_POST_INSTALL_LAUNCH")
             unsetenv("ANDROID_HOME")
             unsetenv("ANDROID_SDK_ROOT")
             try? FileManager.default.removeItem(at: tempDir)
@@ -218,6 +223,7 @@ final class ADBServiceIntegrationSmokeTests: XCTestCase {
 
         setenv("ADB_LOG_FILE", logFile.path, 1)
         setenv("APKINSTALLER_ADB_PATH_OVERRIDE", adbFile.path, 1)
+        setenv("APKINSTALLER_SKIP_POST_INSTALL_LAUNCH", "1", 1)
         setenv("ANDROID_HOME", tempDir.path, 1)
         setenv("ANDROID_SDK_ROOT", tempDir.path, 1)
 
@@ -241,6 +247,7 @@ final class ADBServiceIntegrationSmokeTests: XCTestCase {
         defer {
             unsetenv("ADB_LOG_FILE")
             unsetenv("APKINSTALLER_ADB_PATH_OVERRIDE")
+            unsetenv("APKINSTALLER_SKIP_POST_INSTALL_LAUNCH")
             unsetenv("ANDROID_HOME")
             unsetenv("ANDROID_SDK_ROOT")
             try? FileManager.default.removeItem(at: tempDir)
@@ -294,6 +301,7 @@ final class ADBServiceIntegrationSmokeTests: XCTestCase {
 
         setenv("ADB_LOG_FILE", logFile.path, 1)
         setenv("APKINSTALLER_ADB_PATH_OVERRIDE", adbFile.path, 1)
+        setenv("APKINSTALLER_SKIP_POST_INSTALL_LAUNCH", "1", 1)
         setenv("ANDROID_HOME", tempDir.path, 1)
         setenv("ANDROID_SDK_ROOT", tempDir.path, 1)
 
@@ -317,6 +325,7 @@ final class ADBServiceIntegrationSmokeTests: XCTestCase {
         defer {
             unsetenv("ADB_LOG_FILE")
             unsetenv("APKINSTALLER_ADB_PATH_OVERRIDE")
+            unsetenv("APKINSTALLER_SKIP_POST_INSTALL_LAUNCH")
             unsetenv("ANDROID_HOME")
             unsetenv("ANDROID_SDK_ROOT")
             try? FileManager.default.removeItem(at: tempDir)
@@ -362,6 +371,7 @@ final class ADBServiceIntegrationSmokeTests: XCTestCase {
 
         setenv("ADB_LOG_FILE", logFile.path, 1)
         setenv("APKINSTALLER_ADB_PATH_OVERRIDE", adbFile.path, 1)
+        setenv("APKINSTALLER_SKIP_POST_INSTALL_LAUNCH", "1", 1)
         setenv("ANDROID_HOME", tempDir.path, 1)
         setenv("ANDROID_SDK_ROOT", tempDir.path, 1)
 

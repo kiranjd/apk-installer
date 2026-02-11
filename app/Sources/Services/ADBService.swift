@@ -233,25 +233,28 @@ enum ADBService {
 
         // Keep core path strict: install/update must complete without waiting on peripheral work.
         // Any package-id resolution and app launch are best-effort, detached post-success tasks.
-        let launchExecutable = adbExecutable
-        let launchDeviceID = deviceID
-        let launchLogger = activeInstallLogger
-        let launchFallbackIdentifier = trimmedFallback
-        let launchAPKPath = path
-        Task.detached(priority: .utility) {
-            var launchIdentifier = launchFallbackIdentifier
-            if let resolved = try? await packageIdentifier(from: launchAPKPath),
-               !resolved.isEmpty {
-                launchIdentifier = resolved
-            }
+        let shouldSkipPostInstallLaunch = runtimeEnvironment()["APKINSTALLER_SKIP_POST_INSTALL_LAUNCH"] == "1"
+        if !shouldSkipPostInstallLaunch {
+            let launchExecutable = adbExecutable
+            let launchDeviceID = deviceID
+            let launchLogger = activeInstallLogger
+            let launchFallbackIdentifier = trimmedFallback
+            let launchAPKPath = path
+            Task.detached(priority: .utility) {
+                var launchIdentifier = launchFallbackIdentifier
+                if let resolved = try? await packageIdentifier(from: launchAPKPath),
+                   !resolved.isEmpty {
+                    launchIdentifier = resolved
+                }
 
-            guard let launchIdentifier else { return }
-            await launchLogger?.recordProgress("Best-effort launch for \(launchIdentifier)")
-            _ = try? await launchApp(
-                identifier: launchIdentifier,
-                deviceID: launchDeviceID,
-                executable: launchExecutable
-            )
+                guard let launchIdentifier else { return }
+                await launchLogger?.recordProgress("Best-effort launch for \(launchIdentifier)")
+                _ = try? await launchApp(
+                    identifier: launchIdentifier,
+                    deviceID: launchDeviceID,
+                    executable: launchExecutable
+                )
+            }
         }
 
         return ADBInstallResult(

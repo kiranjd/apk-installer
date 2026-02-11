@@ -2,6 +2,8 @@
 
 `APK Installer` is a native macOS app for quickly installing Android APK files onto connected devices via ADB.
 
+Latest installable release: [GitHub Releases](https://github.com/kiranjd/apk-installer/releases/latest)
+
 ## Demo Video
 
 https://github.com/kiranjd/apk-installer/releases/download/media-2026-02-12/apk-installer.mp4
