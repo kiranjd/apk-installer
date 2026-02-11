@@ -8,7 +8,7 @@ enum ViewConstants {
     static let cardSpacing: CGFloat = 12
     static let buttonHeight: CGFloat = 32
     static let listPadding: CGFloat = 16
-    static let sidebarWidth: CGFloat = 220
+    static let sidebarWidth: CGFloat = 200
     static let cardBackgroundOpacity: CGFloat = 0.05
     static let hoverOpacity: CGFloat = 0.8
 } 

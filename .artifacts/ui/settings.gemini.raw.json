@@ -1,0 +1,19 @@
+{
+  "screen": "settings",
+  "score": 7,
+  "top_issues": [
+    "Inconsistent container styles: The 'Device' section uses a grouped row background, while 'ADB' and 'Package ID' sections use loose controls, breaking visual rhythm.",
+    "Visual dominance of 'Detect': The primary blue button draws excessive attention for a likely one-time action.",
+    "Redundant labeling: 'Package ID fallback' shows 'com.example.app' as both the field label and the value/placeholder.",
+    "Heavy status indicator: The large green 'ADB found' card takes up significant vertical space for a simple boolean state."
+  ],
+  "top_fixes": [
+    "Adopt a consistent `Form` or `List(style: .sidebar)` layout for all sections to align with macOS System Settings paradigms.",
+    "Redesign the ADB status to be subtler (e.g., a status indicator dot or small caption) rather than a large banner.",
+    "Consolidate 'Detect' and 'Choose' actions or make 'Detect' automatic/less intrusive."
+  ],
+  "quick_wins": [
+    "Change the 'Detect' button style to secondary (gray/bordered) to reduce visual noise.",
+    "Rename the label 'com.example.app' to 'Package Name' or 'Bundle ID' to clarify the input field."
+  ]
+}

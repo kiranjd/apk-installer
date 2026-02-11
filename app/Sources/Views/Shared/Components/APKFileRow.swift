@@ -37,14 +37,20 @@ struct APKFileRow: View {
     let file: APKFile
     @State private var isHovered = false
     @EnvironmentObject private var deviceState: ADBDeviceState
+    @EnvironmentObject private var installState: InstallAPKState
     @EnvironmentObject var statusViewModel: StatusViewModel
     @EnvironmentObject var configState: ConfigState
     @State private var isInstallTaskRunning = false
+    @State private var installTask: Task<Void, Never>?
     @State private var animatingGradient = false
     
     private let idleGradient = LinearGradient(gradient: Gradient(colors: [Color.primary.opacity(ViewConstants.cardBackgroundOpacity)]), startPoint: .topLeading, endPoint: .bottomTrailing)
     private let installingGradient = LinearGradient(gradient: Gradient(colors: [Color.green.opacity(0.2), Color.green.opacity(0.4), Color.green.opacity(0.2)]), startPoint: .topLeading, endPoint: .bottomTrailing)
     
+    private var readyDevices: [ADBDevice] {
+        deviceState.devices.filter { $0.status == .device }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: ViewConstants.secondarySpacing) {
             // Top line: APK filename (full width)
@@ -74,70 +80,37 @@ struct APKFileRow: View {
 
                 // Action buttons area, restoring original layout. Replace Open with three-dots menu.
                 HStack(spacing: ViewConstants.secondarySpacing) {
-                    if isHovered {
-                        ActionButtonWithLabel(
-                            icon: "square.and.arrow.down",
-                            label: "Install",
-                            isRunning: isInstallTaskRunning,
-                            isDeviceConnected: !deviceState.devices.isEmpty,
-                            showLabel: true,
-                            action: {
-                                installAPK(isUpdate: false)
-                            }
-                        )
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
-
-                        ActionButtonWithLabel(
-                            icon: "arrow.triangle.2.circlepath",
-                            label: "Update",
-                            isRunning: isInstallTaskRunning,
-                            isDeviceConnected: !deviceState.devices.isEmpty,
-                            showLabel: true,
-                            action: {
-                                installAPK(isUpdate: true)
-                            }
-                        )
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
-
-                        MoreMenuButton(
-                            isRunning: isInstallTaskRunning,
-                            isDeviceConnected: true,
-                            onCopy: { copyAPKToClipboard() },
-                            onClear: { clearStorageForAPK() },
-                            onReveal: { NSWorkspace.shared.selectFile(file.path, inFileViewerRootedAtPath: "") }
-                        )
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
-                    } else {
-                        // Show discoverable ellipsis button when not hovered
-                        Button(action: {}) {
-                            Image(systemName: "ellipsis")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(.secondary)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background {
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .fill(Color.secondary.opacity(0.1))
-                                }
-                                .overlay {
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
-                                }
+                    ActionButtonWithLabel(
+                        icon: "square.and.arrow.down",
+                        label: "Install",
+                        isRunning: isInstallTaskRunning,
+                        isDeviceConnected: !readyDevices.isEmpty,
+                        showLabel: true,
+                        action: {
+                            installAPK(isUpdate: false)
                         }
-                        .buttonStyle(.plain)
-                        .help("Hover to see available actions")
-                        .opacity(isInstallTaskRunning ? 0.5 : 0.7)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    )
 
-                        // Invisible spacers to maintain consistent height
-                        Spacer()
-                            .frame(width: 0)
-                        Spacer()
-                            .frame(width: 0)
-                    }
+                    ActionButtonWithLabel(
+                        icon: "arrow.triangle.2.circlepath",
+                        label: "Update",
+                        isRunning: isInstallTaskRunning,
+                        isDeviceConnected: !readyDevices.isEmpty,
+                        showLabel: true,
+                        action: {
+                            installAPK(isUpdate: true)
+                        }
+                    )
+
+                    MoreMenuButton(
+                        isRunning: isInstallTaskRunning,
+                        isDeviceConnected: !readyDevices.isEmpty,
+                        onCopy: { copyAPKToClipboard() },
+                        onClear: { clearStorageForAPK() },
+                        onReveal: { NSWorkspace.shared.selectFile(file.path, inFileViewerRootedAtPath: "") }
+                    )
                 }
                 .frame(height: 28)
-                .animation(.easeInOut(duration: 0.25), value: isHovered)
             }
         }
         .padding(.horizontal, ViewConstants.primarySpacing)
@@ -237,45 +210,115 @@ struct APKFileRow: View {
                     }
                 }
             }
+            .onChange(of: isRunning) { running in
+                if running {
+                    isButtonHovered = false
+                } else {
+                    // Prevent sticky hover highlight after async task completion.
+                    DispatchQueue.main.async {
+                        isButtonHovered = false
+                    }
+                }
+            }
         }
     }
     
     // MARK: - Helper Methods
     
     private func installAPK(isUpdate: Bool) {
-        Task {
-            isInstallTaskRunning = true
-            animatingGradient = true
-            statusViewModel.showMessage("\(isUpdate ? "Updating" : "Installing") \(file.name)...", type: .progress)
-            defer {
-                isInstallTaskRunning = false
-                animatingGradient = false
-                // Force reset hover state when installation completes
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isHovered = false
-                }
-            }
-            
-            // Determine target device: prompt if auto mode and multiple devices
-            var targetDevice = deviceState.selectedDeviceID
-            if !configState.deviceSelectorEnabled && deviceState.devices.count > 1 {
-                if let chosen = promptForDevice(devices: deviceState.devices) {
-                    targetDevice = chosen
-                } else {
-                    // Canceled; abort install
-                    return
-                }
-            }
-            
-            do {
-                try await ShellCommand.installAPK(path: file.path,
-                                                  isUpdate: isUpdate,
-                                                  device: targetDevice)
-                statusViewModel.showMessage("Successfully \(isUpdate ? "updated" : "installed") \(file.name)", type: .success)
-            } catch {
-                statusViewModel.showMessage("Failed to \(isUpdate ? "update" : "install") \(file.name): \(error.localizedDescription)", type: .error)
+        installTask?.cancel()
+        isInstallTaskRunning = true
+        animatingGradient = true
+
+        let cancelAction: () -> Void = {
+            Task { @MainActor in
+                installTask?.cancel()
             }
         }
+
+        let task = Task {
+            await MainActor.run {
+                statusViewModel.showMessage(
+                    "\(isUpdate ? "Updating" : "Installing") \(file.name)…",
+                    type: .progress,
+                    onCancel: cancelAction
+                )
+            }
+            defer {
+                Task { @MainActor in
+                    isInstallTaskRunning = false
+                    animatingGradient = false
+                    installTask = nil
+                    // Force reset hover state when installation completes.
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isHovered = false
+                    }
+                }
+            }
+            
+            let ready = readyDevices
+            guard !ready.isEmpty else {
+                await MainActor.run {
+                    statusViewModel.showMessage("No Android device connected.", type: .error)
+                }
+                return
+            }
+
+            let targetDevice = ready.first(where: { $0.id == deviceState.selectedDeviceID })?.id
+                ?? ready.first?.id
+            
+            do {
+                _ = try await ADBService.installAPK(
+                    path: file.path,
+                    isUpdate: isUpdate,
+                    deviceID: targetDevice,
+                    fallbackPackageIdentifier: configState.appIdentifier,
+                    onProgress: { message in
+                        await MainActor.run {
+                            statusViewModel.showMessage(
+                                message,
+                                type: .progress,
+                                onCancel: cancelAction
+                            )
+                        }
+                    }
+                )
+                try Task.checkCancellation()
+                await MainActor.run {
+                    installState.lastInstalledAPKPath = file.path
+                    installState.lastInstalledAt = Date()
+                    NotificationCenter.default.post(
+                        name: .apkInstallDidSucceed,
+                        object: nil,
+                        userInfo: ["apkPath": file.path]
+                    )
+                }
+                await MainActor.run {
+                    let completionMessage = "\(isUpdate ? "Updated" : "Installed") \(file.name)"
+                    statusViewModel.showMessage(completionMessage, type: .success)
+                    playCompletionSound()
+                }
+            } catch let commandError as CommandRunnerError {
+                if case .cancelled = commandError {
+                    await MainActor.run {
+                        statusViewModel.showMessage("\(isUpdate ? "Update" : "Install") canceled for \(file.name)", type: .info)
+                    }
+                } else {
+                    await MainActor.run {
+                        statusViewModel.showMessage("Failed to \(isUpdate ? "update" : "install") \(file.name): \(commandError.localizedDescription)", type: .error)
+                    }
+                }
+            } catch is CancellationError {
+                await MainActor.run {
+                    statusViewModel.showMessage("\(isUpdate ? "Update" : "Install") canceled for \(file.name)", type: .info)
+                }
+            } catch {
+                await MainActor.run {
+                    statusViewModel.showMessage("Failed to \(isUpdate ? "update" : "install") \(file.name): \(error.localizedDescription)", type: .error)
+                }
+            }
+        }
+        installTask = task
     }
 
     // MARK: - Three-dots menu button (replaces Open)
@@ -336,6 +379,15 @@ struct APKFileRow: View {
                     }
                 }
             }
+            .onChange(of: isRunning) { running in
+                if running {
+                    isButtonHovered = false
+                } else {
+                    DispatchQueue.main.async {
+                        isButtonHovered = false
+                    }
+                }
+            }
         }
     }
 
@@ -352,47 +404,45 @@ struct APKFileRow: View {
             // Determine package id from APK; fallback to configured identifier
             let pkgId: String
             do {
-                pkgId = try await ShellCommand.getPackageIdentifier(from: file.path)
+                pkgId = try await ADBService.packageIdentifier(from: file.path)
             } catch {
-                pkgId = StorageManager.loadAppIdentifier()
+                pkgId = configState.appIdentifier
             }
-            let targetDevice = deviceState.selectedDeviceID
+            let targetDevice = readyDevices.first(where: { $0.id == deviceState.selectedDeviceID })?.id
+                ?? readyDevices.first?.id
             do {
-                _ = try await ShellCommand.clearAppData(identifier: pkgId, device: targetDevice)
+                try await ADBService.clearAppData(identifier: pkgId, deviceID: targetDevice)
                 statusViewModel.showMessage("Cleared app data for \(pkgId)", type: .success)
             } catch {
                 statusViewModel.showMessage("Failed to clear app data for \(pkgId): \(error.localizedDescription)", type: .error)
             }
         }
     }
-    
-    /// Prompts the user to select one of multiple connected devices.
-    private func promptForDevice(devices: [ADBDevice]) -> String? {
-        let alert = NSAlert()
-        alert.messageText = "Multiple devices detected"
-        alert.informativeText = "Please select a device to install the APK."
-        alert.alertStyle = .informational
-        devices.forEach { device in
-            alert.addButton(withTitle: device.displayName)
+
+    @MainActor
+    private func playCompletionSound() {
+        if let sound = NSSound(named: NSSound.Name("Glass")) {
+            sound.play()
+        } else {
+            NSSound.beep()
         }
-        alert.addButton(withTitle: "Cancel")
-        let response = alert.runModal()
-        let first = NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
-        let index = response.rawValue - first
-        if index >= 0 && index < devices.count {
-            return devices[index].id
-        }
-        return nil
     }
+    
 }
 
 #Preview {
     let exampleFile = APKFile(name: "ExampleApp.apk", path: "/Users/test/app.apk", size: 12345678, modificationDate: .now)
     
     let statusViewModel = StatusViewModel()
+    let installState = InstallAPKState()
+    let deviceState = ADBDeviceState()
+    let configState = ConfigState()
     
     VStack {
         APKFileRow(file: exampleFile)
+            .environmentObject(installState)
+            .environmentObject(deviceState)
+            .environmentObject(configState)
             .environmentObject(statusViewModel)
             .padding()
         

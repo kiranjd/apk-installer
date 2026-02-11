@@ -1,0 +1,19 @@
+{
+"screen": "Settings",
+"score": 1,
+"top_issues": [
+"Screen renders as a completely black/blank void",
+"No visible UI elements, navigation, or content",
+"Complete lack of visual hierarchy or information architecture",
+"Zero accessibility support due to missing content"
+],
+"top_fixes": [
+"Investigate view rendering pipeline for obstruction or occlusion",
+"Verify window content is being drawn to the surface",
+"Check for uninitialized view controllers or zero-sized frames"
+],
+"quick_wins": [
+"Ensure the 'Settings' view is actually attached to the window",
+"Verify background color is not obscuring foreground content"
+]
+}

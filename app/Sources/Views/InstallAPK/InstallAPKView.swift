@@ -1,276 +1,368 @@
-// This is a comment to test for formatting issues.
 import SwiftUI
 import AppKit
-import Combine
-import Dispatch
 
 struct InstallAPKView: View {
     @StateObject var state: InstallAPKState
     @Binding var selection: Int?
+
     @AppStorage("hasDismissedLocationInfo") private var hasDismissedLocationInfo = false
-    @EnvironmentObject var statusViewModel: StatusViewModel
-    @EnvironmentObject var configState: ConfigState
-    @StateObject private var deviceState = ADBDeviceState()
-    
-    private func openSecuritySettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
-            NSWorkspace.shared.open(url)
-        }
-    }
-    
+    @EnvironmentObject private var statusViewModel: StatusViewModel
+    @EnvironmentObject private var configState: ConfigState
+    @EnvironmentObject private var deviceState: ADBDeviceState
+
+    @State private var locations: [APKLocation] = []
+    @State private var didAutoPromptForFolderAccess = false
+
+    private let fieldLabelWidth: CGFloat = 64
+    private let selectorMinWidth: CGFloat = 150
+
     var body: some View {
         VStack(alignment: .leading, spacing: ViewConstants.primarySpacing) {
-            InfoBarView(hasDismissedLocationInfo: $hasDismissedLocationInfo)
-            LocationAndDevicePickerView(state: state, deviceState: deviceState, selectNewLocation: selectNewLocation, checkPermission: checkPermission)
-            
-            // Device connection guidance
-            if configState.deviceSelectorEnabled && deviceState.devices.isEmpty {
-                DeviceConnectionGuidanceView()
-            }
-            
-            PermissionStatusSectionView(state: state)
-            ScanningStatusView(state: state, openSecuritySettings: openSecuritySettings)
-            APKListView(state: state)
+            Text("APK Installer")
+                .font(.system(.title2, design: .rounded).weight(.semibold))
+            Text("Install and update APK files on Android devices over ADB.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            infoBar
+            folderAndDeviceRow
+            deviceConnectionGuidance
+            scanningStatus
+            apkList
         }
         .padding(ViewConstants.primarySpacing)
+        .navigationTitle("Install APK")
         .onAppear {
-            let locations = StorageManager.loadLocations()
-            // Restore last selected location if available, otherwise default to the first.
-            if state.selectedLocation == nil {
-                if let lastPath = StorageManager.loadLastSelectedLocation(),
-                   let lastLocation = locations.first(where: { $0.path == lastPath }) {
-                    state.selectedLocation = lastLocation
-                } else if !locations.isEmpty {
-                    state.selectedLocation = locations[0]
-                }
-            }
-            if let path = state.selectedLocation?.path {
-                checkPermission(for: path)
-            }
+            reloadLocations()
+            restoreInitialSelection()
         }
-        .environmentObject(deviceState)
-    }
-    
-    // MARK: - Subviews
-
-    private struct DeviceConnectionGuidanceView: View {
-        var body: some View {
-            HStack(spacing: ViewConstants.secondarySpacing) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(.orange)
-                    .font(.system(size: 16))
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("No Android device connected")
-                        .font(.callout)
-                        .fontWeight(.medium)
-                        .foregroundColor(.primary)
-                    
-                    Text("Please connect an Android device via USB and enable ADB debugging to install APKs.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                
-                Spacer()
-                
-                Button("Help") {
-                    // Open ADB setup help
-                    if let url = URL(string: "https://developer.android.com/studio/command-line/adb#Enabling") {
-                        NSWorkspace.shared.open(url)
-                    }
-                }
-                .buttonStyle(.borderless)
-                .font(.caption)
+        .onChange(of: state.selectedLocation) { newLocation in
+            guard let newLocation else {
+                state.apkFiles = []
+                state.selectedAPKPath = nil
+                state.hasPermission = false
+                return
             }
-            .padding(ViewConstants.secondarySpacing)
-            .background(Color.orange.opacity(0.1))
-            .clipShape(RoundedRectangle(cornerRadius: ViewConstants.cornerRadius))
-            .transition(.move(edge: .top).combined(with: .opacity))
+            StorageManager.saveLastSelectedLocation(newLocation)
+            checkPermission(for: newLocation.path)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .apkInstallDidSucceed)) { output in
+            let installedPath = output.userInfo?["apkPath"] as? String
+            state.lastInstalledAPKPath = installedPath
+            state.lastInstalledAt = Date()
         }
     }
 
-    private struct InfoBarView: View {
-        @Binding var hasDismissedLocationInfo: Bool
-        
-        var body: some View {
+    // MARK: - UI
+
+    private var infoBar: some View {
+        Group {
             if !hasDismissedLocationInfo {
-                HStack {
-                    Image(systemName: "info.circle")
-                        .foregroundStyle(.blue)
-                    Text("Tip: Use the '+' button next to the dropdown to add new APK locations.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button {
-                        withAnimation {
-                            hasDismissedLocationInfo = true
+                VStack(alignment: .leading, spacing: 8) {
+                    StepChecklistRow(
+                        title: "Choose a folder with APK files",
+                        isCompleted: isFolderStepCompleted
+                    )
+                    StepChecklistRow(
+                        title: "Connect your Android device or emulator",
+                        isCompleted: isDeviceStepCompleted
+                    )
+                    StepChecklistRow(
+                        title: "Install or Update an APK",
+                        isCompleted: isInstallStepCompleted
+                    )
+
+                    HStack {
+                        Spacer()
+                        Button("Done") {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                hasDismissedLocationInfo = true
+                            }
                         }
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.tertiary)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
                     }
-                    .buttonStyle(.plain)
+                    .padding(.top, 6)
                 }
                 .padding(ViewConstants.secondarySpacing)
-                .background(Color.blue.opacity(0.1))
+                .background(Color.blue.opacity(0.10))
                 .clipShape(RoundedRectangle(cornerRadius: ViewConstants.cornerRadius))
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
     }
 
-    private struct LocationAndDevicePickerView: View {
-        @ObservedObject var state: InstallAPKState
-        @ObservedObject var deviceState: ADBDeviceState
-        let selectNewLocation: () -> Void
-        let checkPermission: (String) -> Void
+    private struct StepChecklistRow: View {
+        let title: String
+        let isCompleted: Bool
 
-        @EnvironmentObject private var statusViewModel: StatusViewModel
-        @EnvironmentObject var configState: ConfigState
-        @State private var directoryMonitor: DirectoryMonitor?
-        
         var body: some View {
-            HStack(alignment: .center, spacing: ViewConstants.secondarySpacing) {
-                Picker("Location", selection: $state.selectedLocation) {
-                    Text("ℹ️ Select or add a location with APKs")
-                        .tag(Optional<APKLocation>.none)
+            HStack(spacing: 8) {
+                Image(systemName: isCompleted ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(isCompleted ? .green : .blue)
+                    .font(.system(size: 15, weight: .semibold))
 
-                    ForEach(StorageManager.loadLocations()) { location in
-                        LocationPickerRowView(location: location)
-                            .tag(Optional(location))
-                    }
+                Text(title)
+                    .font(.callout)
+                    .foregroundStyle(isCompleted ? .primary : .secondary)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var folderAndDeviceRow: some View {
+        HStack(alignment: .center, spacing: 12) {
+            folderGroup
+                .frame(maxWidth: .infinity, alignment: .leading)
+            deviceGroup
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var folderGroup: some View {
+        HStack(spacing: 8) {
+            Text("Folder")
+                .font(.headline.weight(.semibold))
+                .lineLimit(1)
+                .frame(width: fieldLabelWidth, alignment: .leading)
+
+            Picker("", selection: $state.selectedLocation) {
+                Text("Select a folder with APKs…").tag(Optional<APKLocation>.none)
+                ForEach(locations) { location in
+                    Text(displayPath(location.path)).tag(Optional(location))
                 }
-                .pickerStyle(.menu)
-                .frame(maxWidth: 400)
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(minWidth: selectorMinWidth, maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
 
+            ControlGroup {
                 Button {
-                    selectNewLocation()
+                    chooseFolder()
                 } label: {
                     Image(systemName: "plus.circle.fill")
-                        .foregroundStyle(.blue)
-                        .font(.title3)
                 }
-                .buttonStyle(.plain)
-                .help("Add a new folder location")
+                .help("Add folder")
 
-                // Manual refresh button; removed auto-reload and change notifications.
                 Button {
-                    if let path = state.selectedLocation?.path {
-                        state.scanError = nil
-                        checkPermission(path)
-                    }
+                    refreshFolder()
                 } label: {
                     Image(systemName: "arrow.clockwise.circle.fill")
-                        .foregroundStyle(.blue)
-                        .font(.title3)
+                }
+                .help("Refresh APK list")
+            }
+            .controlGroupStyle(.navigation)
+            .fixedSize(horizontal: true, vertical: false)
+        }
+        .controlSize(.small)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color.primary.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+    }
+
+    private var deviceGroup: some View {
+        HStack(spacing: 8) {
+            Text("Device")
+                .font(.headline.weight(.semibold))
+                .lineLimit(1)
+                .frame(width: fieldLabelWidth, alignment: .leading)
+
+            devicePicker
+                .frame(minWidth: selectorMinWidth, maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
+
+            deviceConnectionIndicator
+
+            if shouldShowADBInfoIcon {
+                Button {
+                    openADBHelp()
+                } label: {
+                    Image(systemName: "info.circle")
                 }
                 .buttonStyle(.plain)
-                .help("Refresh APK list")
-
-                if configState.deviceSelectorEnabled {
-                    Spacer(minLength: ViewConstants.primarySpacing)
-                    // Device menu / status
-                    Group {
-                    if let error = deviceState.errorMessage {
-                        HStack(spacing: ViewConstants.secondarySpacing) {
-                            Text("Device")
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.red)
-                            Text(error)
-                                .font(.caption)
-                        }
-                        .help("Error listing devices")
-                    } else if deviceState.devices.isEmpty {
-                        Button {
-                            // Refresh device list when clicked
-                            deviceState.fetchDevices()
-                        } label: {
-                            HStack(spacing: ViewConstants.secondarySpacing) {
-                                Text("Device")
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                    .foregroundColor(.orange)
-                                Text("No device connected")
-                                    .font(.caption)
-                                    .foregroundColor(.orange)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .help("No Android devices detected. Connect a device via USB or ensure ADB is enabled.\n\nClick to refresh device list.")
-                    } else {
-                        HStack(spacing: ViewConstants.secondarySpacing) {
-                            Text("Device")
-                            Menu {
-                                ForEach(deviceState.devices) { device in
-                                    Button {
-                                        deviceState.selectedDeviceID = device.id
-                                    } label: {
-                                        HStack {
-                                            Text(device.displayName)
-                                            if device.id == deviceState.selectedDeviceID {
-                                                Image(systemName: "checkmark")
-                                            }
-                                        }
-                                    }
-                                }
-                            } label: {
-                                HStack(spacing: ViewConstants.secondarySpacing) {
-                                    Image(systemName: "cpu.fill")
-                                    Text(deviceState.devices.first(where: { $0.id == deviceState.selectedDeviceID })?.displayName ?? "Select Device")
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
-                                }
-                                .font(.caption)
-                            }
-                            .menuStyle(.borderlessButton)
-                            .buttonStyle(.plain)
-                            .help(deviceState.lastUpdated.map { "Last updated: \($0.formatted(.relative(presentation: .named)))" } ?? "Fetching devices...")
-                        }
-                    }
-                    }
-                }
+                .help("ADB setup help")
             }
-            .onChange(of: state.selectedLocation) { newLocation in
-                if let location = newLocation {
-                    state.scanError = nil
-                    checkPermission(location.path)
-                } else {
-                    state.apkFiles = []
+        }
+        .controlSize(.small)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color.primary.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+    }
+
+    private var deviceConnectionGuidance: some View {
+        Group {
+            if shouldShowConnectionBanner {
+                HStack(spacing: ViewConstants.secondarySpacing) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                        .font(.system(size: 16))
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(unauthorizedDevices.isEmpty ? "No Android device connected" : "Authorize on phone")
+                            .font(.callout)
+                            .fontWeight(.medium)
+                            .foregroundColor(.primary)
+
+                        Text(
+                            unauthorizedDevices.isEmpty
+                                ? "Connect an Android device via USB and enable USB debugging."
+                                : "Unlock your phone and tap “Allow USB debugging”, then refresh devices."
+                        )
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
+                    Spacer()
+
+                    HStack(spacing: 10) {
+                        Button("Open USB debugging guide") { openADBHelp() }
+                            .buttonStyle(.link)
+
+                        Button("Refresh devices") { deviceState.fetchDevices() }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
+                    .font(.caption)
+                    .fixedSize()
                 }
-                StorageManager.saveLastSelectedLocation(newLocation)
+                .overlay(alignment: .trailing) {
+                    if !unauthorizedDevices.isEmpty {
+                        Text("Authorize on phone")
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Color.orange.opacity(0.18))
+                            .clipShape(Capsule())
+                            .padding(.trailing, 8)
+                            .padding(.top, 6)
+                    }
+                }
+                .padding(ViewConstants.secondarySpacing)
+                .background(Color.orange.opacity(0.10))
+                .clipShape(RoundedRectangle(cornerRadius: ViewConstants.cornerRadius))
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
     }
 
-    private struct PermissionStatusSectionView: View {
-        @ObservedObject var state: InstallAPKState
-        
-        var body: some View {
-            if let location = state.selectedLocation {
-                PermissionStatusView(path: location.path, hasPermission: state.hasPermission)
-                    .padding(.horizontal, ViewConstants.primarySpacing)
-            }
-        }
+    private var shouldShowConnectionBanner: Bool {
+        readyDevices.isEmpty && deviceState.errorMessage == nil
     }
 
-    private struct ScanningStatusView: View {
-        @ObservedObject var state: InstallAPKState
-        let openSecuritySettings: () -> Void
-        
-        var body: some View {
+    private var unauthorizedDevices: [ADBDevice] {
+        deviceState.devices.filter { $0.status == .unauthorized }
+    }
+
+    private var discoveredDevices: [ADBDevice] {
+        deviceState.devices
+    }
+
+    private var isFolderStepCompleted: Bool {
+        state.selectedLocation != nil && state.hasPermission
+    }
+
+    private var isDeviceStepCompleted: Bool {
+        !readyDevices.isEmpty
+    }
+
+    private var isInstallStepCompleted: Bool {
+        state.lastInstalledAt != nil
+    }
+
+    private var deviceStatusChip: some View {
+        let (text, fg, bg): (String, Color, Color) = {
+            if let error = deviceState.errorMessage, !error.isEmpty {
+                return ("ADB error", .red, Color.red.opacity(0.14))
+            }
+            if !unauthorizedDevices.isEmpty {
+                return ("Unauthorized", .orange, Color.orange.opacity(0.18))
+            }
+            if readyDevices.isEmpty {
+                return ("Not connected", .orange, Color.orange.opacity(0.16))
+            }
+            return ("\(readyDevices.count) connected", .green, Color.green.opacity(0.16))
+        }()
+
+        return Text(text)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(fg)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(bg)
+            .clipShape(Capsule())
+    }
+
+    private var selectedDeviceTitle: String {
+        discoveredDevices.first(where: { $0.id == deviceState.selectedDeviceID })?.displayName ?? "Select Device"
+    }
+
+    private var devicePicker: some View {
+        Picker("", selection: Binding<String?>(
+            get: { deviceState.selectedDeviceID },
+            set: { deviceState.selectedDeviceID = $0 }
+        )) {
+            if discoveredDevices.isEmpty {
+                Text("No devices").tag(Optional<String>.none)
+            } else {
+                ForEach(discoveredDevices) { device in
+                    Text(device.displayName).tag(Optional(device.id))
+                }
+            }
+        }
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .frame(minWidth: selectorMinWidth, maxWidth: .infinity, alignment: .leading)
+        .layoutPriority(1)
+        .help(deviceState.lastUpdated.map { "Last updated: \($0.formatted(.relative(presentation: .named)))" } ?? "Fetching devices…")
+    }
+
+    private var deviceConnectionIndicator: some View {
+        let color: Color = {
+            if let error = deviceState.errorMessage, !error.isEmpty { return .red }
+            if !unauthorizedDevices.isEmpty { return .orange }
+            if readyDevices.isEmpty { return .orange }
+            return .green
+        }()
+
+        let label: String = {
+            if let error = deviceState.errorMessage, !error.isEmpty { return "ADB error" }
+            if !unauthorizedDevices.isEmpty { return "Device unauthorized" }
+            if readyDevices.isEmpty { return "No connected device" }
+            return "\(readyDevices.count) connected"
+        }()
+
+        return Image(systemName: "circle.fill")
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(color)
+            .help(label)
+    }
+
+    private var shouldShowADBInfoIcon: Bool {
+        if let error = deviceState.errorMessage, !error.isEmpty {
+            return true
+        }
+        return readyDevices.isEmpty || !unauthorizedDevices.isEmpty
+    }
+
+    private var scanningStatus: some View {
+        Group {
             if state.isScanning || state.scanError != nil {
                 HStack(spacing: ViewConstants.secondarySpacing) {
                     if state.isScanning {
-                        // Simple loading indicator
                         ProgressView()
-                            .scaleEffect(0.6)
+                            .scaleEffect(0.7)
                             .frame(width: 16, height: 16)
-                        
+
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Scanning for APK files...")
+                            Text("Scanning for APK files…")
                                 .foregroundStyle(.secondary)
                                 .font(.caption)
-                            
-                            // Show the path being scanned
+
                             if let selectedPath = state.selectedLocation?.path {
                                 Text(selectedPath)
                                     .font(.caption2)
@@ -279,69 +371,81 @@ struct InstallAPKView: View {
                                     .truncationMode(.middle)
                             }
                         }
-                        
+
                         Spacer()
-                        
                     } else if let error = state.scanError {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundStyle(.red)
                         Text(error)
                             .foregroundStyle(.red)
                         Spacer()
-                        Button("Open Settings") {
-                            openSecuritySettings()
-                        }
-                        .buttonStyle(.borderless)
+                        Button("Open Settings") { openSecuritySettings() }
+                            .buttonStyle(.borderless)
                     }
                 }
                 .font(.caption)
                 .padding(ViewConstants.secondarySpacing)
-                .background {
+                .background(
                     RoundedRectangle(cornerRadius: ViewConstants.cornerRadius)
                         .fill(Color.primary.opacity(0.05))
-                }
+                )
             }
         }
     }
 
+    private var apkList: some View {
+        APKListView(state: state)
+            .environmentObject(deviceState)
+            .environmentObject(statusViewModel)
+            .environmentObject(configState)
+    }
+
+    private var readyDevices: [ADBDevice] {
+        deviceState.devices.filter { $0.status == .device }
+    }
+
+    // MARK: - APK list
+
     private struct APKListView: View {
         @ObservedObject var state: InstallAPKState
         @State private var visibleItems: Set<String> = []
-        
+
         var body: some View {
-            if state.apkFiles.isEmpty && !state.isScanning {
-                VStack(spacing: 8) {
-                    Image(systemName: "doc.text.magnifyingglass")
-                        .font(.system(size: 40))
-                        .foregroundColor(.secondary)
-                    Text("No APKs Found")
-                        .font(.headline)
-                    Text("Select or add a folder containing APK files")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if state.selectedLocation == nil {
+                emptyState(
+                    title: "Choose a Folder",
+                    message: "Select or add a folder containing APK files."
+                )
+            } else if !state.hasPermission {
+                emptyState(
+                    title: "Folder Access Required",
+                    message: "Re-choose the folder to grant access."
+                )
+            } else if state.apkFiles.isEmpty && !state.isScanning {
+                emptyState(
+                    title: "No APKs Found",
+                    message: "Select or add a folder containing APK files."
+                )
             } else {
-                // APK Files List
                 ScrollView {
                     LazyVStack(spacing: ViewConstants.cardSpacing) {
                         ForEach(Array(state.apkFiles.prefix(state.displayLimit).enumerated()), id: \.element.id) { index, file in
                             APKFileRow(file: file)
+                                .environmentObject(state)
                                 .disabled(!state.hasPermission)
-                                .opacity(visibleItems.contains(file.id.uuidString) ? 1 : 0)
-                                .offset(y: visibleItems.contains(file.id.uuidString) ? 0 : 20)
-                                .animation(.easeOut(duration: 0.4).delay(Double(index) * 0.1), value: visibleItems)
+                                .opacity(visibleItems.contains(file.id) ? 1 : 0)
+                                .offset(y: visibleItems.contains(file.id) ? 0 : 20)
+                                .animation(.easeOut(duration: 0.4).delay(Double(index) * 0.08), value: visibleItems)
                         }
-                        
+
                         if state.apkFiles.count > state.displayLimit {
                             Button {
                                 state.displayLimit += 10
-                                // Animate new items when "Load More" is pressed
                                 animateNewItems()
                             } label: {
                                 HStack {
                                     Text("Load More")
-                                    Text("(\((state.apkFiles.count - state.displayLimit)) remaining)")
+                                    Text("(\(max(0, state.apkFiles.count - state.displayLimit)) remaining)")
                                         .foregroundStyle(.secondary)
                                 }
                                 .frame(maxWidth: .infinity)
@@ -352,237 +456,250 @@ struct InstallAPKView: View {
                                 RoundedRectangle(cornerRadius: ViewConstants.cornerRadius)
                                     .fill(Color.primary.opacity(ViewConstants.cardBackgroundOpacity))
                             }
-                            .padding(.horizontal, ViewConstants.listPadding)
                         }
                     }
-                    .padding(.horizontal, ViewConstants.listPadding)
                 }
                 .onChange(of: state.apkFiles) { _ in
-                    // Trigger stagger animation when APK files are loaded
                     animateItems()
                 }
             }
         }
-        
+
+        private func emptyState(title: String, message: String) -> some View {
+            VStack(spacing: 8) {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.system(size: 40))
+                    .foregroundStyle(.secondary)
+                Text(title)
+                    .font(.headline)
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+
         private func animateItems() {
             visibleItems.removeAll()
-            
+
             let itemsToShow = Array(state.apkFiles.prefix(state.displayLimit))
             for (index, file) in itemsToShow.enumerated() {
-                DispatchQueue.main.asyncAfter(deadline: .now() + Double(index) * 0.1) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + Double(index) * 0.08) {
                     withAnimation(.easeOut(duration: 0.4)) {
-                        _ = visibleItems.insert(file.id.uuidString)
+                        _ = visibleItems.insert(file.id)
                     }
                 }
             }
         }
-        
+
         private func animateNewItems() {
             let currentVisibleCount = visibleItems.count
             let newItemsToShow = Array(state.apkFiles.prefix(state.displayLimit))
-            
-            for (index, file) in newItemsToShow.enumerated() {
-                if index >= currentVisibleCount {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + Double(index - currentVisibleCount) * 0.1) {
-                        withAnimation(.easeOut(duration: 0.4)) {
-                            _ = visibleItems.insert(file.id.uuidString)
-                        }
+
+            for (index, file) in newItemsToShow.enumerated() where index >= currentVisibleCount {
+                DispatchQueue.main.asyncAfter(deadline: .now() + Double(index - currentVisibleCount) * 0.08) {
+                    withAnimation(.easeOut(duration: 0.4)) {
+                        _ = visibleItems.insert(file.id)
                     }
                 }
             }
         }
     }
 
-    // Extracted Row View for Hover State Management
-    private struct LocationPickerRowView: View {
-        let location: APKLocation
+    // MARK: - Actions
 
-        var body: some View {
-            HStack {
-                Text(location.path)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            // Prevent the row selection from triggering the delete button action immediately
-            .onTapGesture { /* Absorb tap, Picker handles selection */ }
+    private func openSecuritySettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+            NSWorkspace.shared.open(url)
         }
     }
 
-    private func scanDirectory(_ path: String) {
-        let directoryURL = URL(fileURLWithPath: path)
-        
-        // Cancel any existing scan before starting a new one
-        state.cancelCurrentScan()
-        
-        // Show loading state immediately
-        state.isScanning = true
-        state.apkFiles = []
-        state.displayLimit = 10
-        state.scanError = nil
-        
-        print("\n=== Starting APK Scan ===")
-        print("📂 Root directory: \(path)")
-
-        let scanTask = Task.detached { [weak state] in
-            do {
-                // Check if task was cancelled before we start
-                guard !Task.isCancelled else {
-                    print("🚫 Scan cancelled before starting for: \(path)")
-                    return
-                }
-                
-                // Check/request permission on background thread
-                let hasBookmark = FilePermissionManager.shared.hasBookmark(for: path)
-                
-                if !hasBookmark {
-                    try FilePermissionManager.shared.saveBookmark(for: directoryURL)
-                }
-
-                guard FilePermissionManager.shared.restoreAccess(for: path) else {
-                    guard !Task.isCancelled else { return }
-                    await MainActor.run {
-                        state?.scanError = "Please reselect the folder to grant access"
-                        state?.isScanning = false
-                        state?.hasPermission = false
-                    }
-                    return
-                }
-
-                guard !Task.isCancelled else {
-                    print("🚫 Scan cancelled after permission check for: \(path)")
-                    return
-                }
-
-                await MainActor.run {
-                    state?.hasPermission = true
-                }
-
-                // Do all scanning in background - no UI updates during scan
-                let newFiles = FileManager.getAPKFiles(in: directoryURL)
-
-                // Check if task was cancelled before applying results
-                guard !Task.isCancelled else {
-                    print("🚫 Scan cancelled before applying results for: \(path)")
-                    return
-                }
-
-                print("\n✅ Scan completed")
-                print("📱 APK files found: \(newFiles.count)")
-
-                // Single UI update at the end
-                await MainActor.run {
-                    // Double-check that we're still supposed to be scanning this path
-                    guard state?.selectedLocation?.path == path else {
-                        print("🚫 Location changed during scan, discarding results for: \(path)")
-                        return
-                    }
-                    
-                    state?.apkFiles = newFiles
-                    state?.isScanning = false
-                    state?.currentScanPath = ""
-                }
-
-            } catch {
-                guard !Task.isCancelled else { return }
-                print("❌ Error: \(error.localizedDescription)")
-                await MainActor.run {
-                    // Only update error state if we're still scanning the same path
-                    guard state?.selectedLocation?.path == path else { return }
-                    
-                    state?.scanError = error.localizedDescription
-                    state?.isScanning = false
-                    state?.currentScanPath = ""
-                    state?.hasPermission = false
-                }
-            }
-        }
-        
-        // Store the task reference so it can be cancelled later
-        state.setScanTask(scanTask)
+    private func openADBHelp() {
+        guard let url = URL(string: AppConfig.adbHelpURL) else { return }
+        NSWorkspace.shared.open(url)
     }
 
-    private func checkPermission(for path: String) {
-        // Cancel any existing scan when checking permission for a new path
-        state.cancelCurrentScan()
-        
-        Task.detached { [weak state] in
-            // Check permission on background thread
-            let hasPermission = FilePermissionManager.shared.restoreAccess(for: path)
-            
-            await MainActor.run {
-                // Only update state if we're still supposed to be checking this path
-                guard state?.selectedLocation?.path == path else { return }
-                
-                state?.hasPermission = hasPermission
-                if !hasPermission {
-                    print("❗ No permission for: \(path)")
-                    state?.scanError = "Permission needed. Please re-select the folder."
-                    state?.apkFiles = [] // Clear files if no permission
-                    state?.isScanning = false
-                } else {
-                    print("✅ Permission OK for: \(path)")
-                    state?.scanError = nil // Clear error if permission is now granted
-                }
+    private func reloadLocations() {
+        locations = StorageManager.loadLocations()
+            .sorted(by: { $0.path.localizedStandardCompare($1.path) == .orderedAscending })
+    }
+
+    private func restoreInitialSelection() {
+        if state.selectedLocation == nil {
+            let loaded = StorageManager.loadLocations()
+            if let lastPath = StorageManager.loadLastSelectedLocation(),
+               let lastLocation = loaded.first(where: { $0.path == lastPath }) {
+                state.selectedLocation = lastLocation
+            } else {
+                state.selectedLocation = loaded.first
             }
-            
-            // Only scan if we have permission and we're still supposed to be on this path
-            if hasPermission {
-                await MainActor.run {
-                    guard state?.selectedLocation?.path == path else { return }
-                    scanDirectory(path)
-                }
+        }
+
+        if let path = state.selectedLocation?.path {
+            checkPermission(for: path)
+
+            // If we cannot read the selected folder (common for ~/Downloads due to TCC),
+            // proactively prompt the user to re-select it so we can create a bookmark.
+            if !didAutoPromptForFolderAccess,
+               !FilePermissionManager.shared.hasBookmark(for: path),
+               !hasDirectFolderAccess(path) {
+                didAutoPromptForFolderAccess = true
+                chooseFolder(startingAt: path)
             }
         }
     }
 
-    private func selectNewLocation() {
+    private func chooseFolder() {
+        chooseFolder(startingAt: nil)
+    }
+
+    private func chooseFolder(startingAt path: String?) {
         let openPanel = NSOpenPanel()
         openPanel.allowsMultipleSelection = false
         openPanel.canChooseDirectories = true
         openPanel.canChooseFiles = false
         openPanel.canCreateDirectories = true
-        openPanel.prompt = "Select Folder"
+        openPanel.prompt = "Choose"
+        if let path {
+            openPanel.directoryURL = URL(fileURLWithPath: path)
+        }
 
-        openPanel.begin { [self] response in
-            if response == .OK {
-                if let selectedURL = openPanel.url {
-                    // Move heavy operations to background thread
-                    Task.detached { [self] in
-                        do {
-                            // Attempt to save bookmark on background thread
-                            try FilePermissionManager.shared.saveBookmark(for: selectedURL)
-                            let newLocation = APKLocation(path: selectedURL.path)
+        openPanel.begin { response in
+            guard response == .OK, let selectedURL = openPanel.url else { return }
 
-                            // Update locations in StorageManager on background thread
-                            var currentLocations = StorageManager.loadLocations()
-                            
-                            await MainActor.run {
-                                // UI updates on main thread
-                                if !currentLocations.contains(where: { $0.path == newLocation.path }) {
-                                    currentLocations.append(newLocation)
-                                    StorageManager.saveLocations(currentLocations)
-                                    print("💾 New location saved: \(newLocation.path)")
+            Task { [weak state] in
+                do {
+                    try FilePermissionManager.shared.saveBookmark(for: selectedURL)
 
-                                    // Select the newly added location
-                                    self.state.selectedLocation = newLocation
-                                } else {
-                                    print("⚠️ Location already exists: \(newLocation.path)")
-                                    // Optionally select the existing location if needed
-                                    self.state.selectedLocation = currentLocations.first { $0.path == newLocation.path }
-                                }
-                            }
-
-                        } catch {
-                            let errorMessage = "Failed to save folder access: \(error.localizedDescription)"
-                            print("❌ \(errorMessage)")
-                            await MainActor.run {
-                                self.statusViewModel.showMessage(errorMessage, type: .error)
-                            }
-                        }
+                    var currentLocations = StorageManager.loadLocations()
+                    let newLocation = APKLocation(path: selectedURL.path)
+                    if !currentLocations.contains(where: { $0.path == newLocation.path }) {
+                        currentLocations.append(newLocation)
+                        StorageManager.saveLocations(currentLocations)
                     }
+
+                    await MainActor.run {
+                        self.reloadLocations()
+                        state?.selectedLocation = newLocation
+                    }
+                } catch {
+                    statusViewModel.showMessage("Failed to save folder access: \(error.localizedDescription)", type: .error)
                 }
             }
         }
+    }
+
+    private func refreshFolder() {
+        guard let path = state.selectedLocation?.path else {
+            chooseFolder()
+            return
+        }
+        checkPermission(for: path)
+    }
+
+    // MARK: - Scanning / permissions
+
+    private func hasDirectFolderAccess(_ path: String) -> Bool {
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else {
+            return false
+        }
+        do {
+            _ = try FileManager.default.contentsOfDirectory(atPath: path)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    @MainActor
+    private func checkPermission(for path: String) {
+        state.cancelCurrentScan()
+
+        Task {
+            // When no bookmark exists, attempt direct access first so Downloads (and
+            // non-sandbox builds) work without forcing a picker round-trip.
+            let hasBookmark = FilePermissionManager.shared.hasBookmark(for: path)
+            let hasScopedAccess = hasBookmark ? FilePermissionManager.shared.restoreAccess(for: path) : false
+            let hasDirectAccess = hasDirectFolderAccess(path)
+            let hasPermission = hasScopedAccess || hasDirectAccess
+
+            guard state.selectedLocation?.path == path else { return }
+            state.hasPermission = hasPermission
+
+            if !hasPermission {
+                state.scanError = "Folder access required. Choose the folder again to grant access."
+                state.apkFiles = []
+                state.selectedAPKPath = nil
+                state.lastScanAt = nil
+                state.isScanning = false
+                return
+            }
+
+            state.scanError = nil
+            scanDirectory(path)
+        }
+    }
+
+    @MainActor
+    private func scanDirectory(_ path: String) {
+        let directoryURL = URL(fileURLWithPath: path)
+
+        state.cancelCurrentScan()
+        state.isScanning = true
+        state.apkFiles = []
+        state.displayLimit = 10
+        state.scanError = nil
+
+        let task = Task(priority: .userInitiated) {
+            do {
+                try Task.checkCancellation()
+
+                if !FilePermissionManager.shared.hasBookmark(for: path) {
+                    _ = try? FilePermissionManager.shared.saveBookmark(for: directoryURL)
+                }
+                let hasScopedAccess = FilePermissionManager.shared.restoreAccess(for: path)
+
+                try Task.checkCancellation()
+
+                let files = try await Task.detached(priority: .userInitiated) {
+                    try APKScanner.scan(in: directoryURL)
+                }.value
+
+                try Task.checkCancellation()
+
+                guard state.selectedLocation?.path == path else { return }
+                state.apkFiles = files
+                state.lastScanAt = Date()
+                state.isScanning = false
+                state.hasPermission = hasScopedAccess || hasDirectFolderAccess(path)
+
+                if let selectedPath = state.selectedAPKPath,
+                   files.contains(where: { $0.path == selectedPath }) {
+                    // Keep selection.
+                } else {
+                    state.selectedAPKPath = files.first?.path
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                guard state.selectedLocation?.path == path else { return }
+                state.scanError = error.localizedDescription
+                state.isScanning = false
+                state.hasPermission = false
+            }
+        }
+
+        state.setScanTask(task)
+    }
+
+    // MARK: - Formatting
+
+    private func displayPath(_ path: String) -> String {
+        if path.hasPrefix(NSHomeDirectory()) {
+            return path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+        }
+        return path
     }
 }
 
@@ -590,10 +707,11 @@ struct InstallAPKView: View {
     struct PreviewWrapper: View {
         @State var selection: Int? = 0
         var body: some View {
-             InstallAPKView(state: AppState().installAPKState, selection: $selection)
-                 .environmentObject(StatusViewModel())
-                 .frame(width: 600, height: 400)
+            InstallAPKView(state: AppState().installAPKState, selection: $selection)
+                .environmentObject(StatusViewModel())
+                .environmentObject(ConfigState())
+                .frame(width: 740, height: 520)
         }
     }
     return PreviewWrapper()
-} 
+}

@@ -17,44 +17,62 @@ class StatusViewModel: ObservableObject {
     @Published var timestamp: Date? = nil  // When the message was shown
     
     private var autoDismissTask: Task<Void, Never>?
+    private var progressCancelAction: (() -> Void)?
 
-    func showMessage(_ message: String, type: StatusType, progress: Double? = nil) {
-        // Cancel any existing auto-dismiss task
+    func showMessage(
+        _ message: String,
+        type: StatusType,
+        progress: Double? = nil,
+        onCancel: (() -> Void)? = nil
+    ) {
         autoDismissTask?.cancel()
-        
+
         self.message = message
         self.statusType = type
         self.progress = progress
         self.timestamp = Date()
-        
-        // Always ensure visibility when showing a new message
+        self.progressCancelAction = (type == .progress) ? onCancel : nil
+
         if !isVisible {
-             self.isVisible = true
+            self.isVisible = true
         }
-        
-        // Reset progress if the new type isn't progress
+
         if type != .progress {
             self.progress = nil
         }
-        
-        // Do not auto-dismiss; keep visible until user dismisses
+
+        guard type != .progress else { return }
+        let dismissDelay: UInt64 = type == .error ? 8_000_000_000 : 4_000_000_000
+        autoDismissTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: dismissDelay)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                self?.hide()
+            }
+        }
     }
     
     func updateProgress(_ progress: Double) {
         guard statusType == .progress else { return }
-        // Only update progress if a progress message is already visible
         if isVisible {
-             self.progress = progress
+            self.progress = progress
         }
     }
 
     func hide() {
         autoDismissTask?.cancel()
         isVisible = false
-        progress = nil // Reset progress when hiding
-        // Clear message on hide to prevent showing stale text briefly on next show
+        progress = nil
         message = ""
         timestamp = nil
+        progressCancelAction = nil
+    }
+
+    func dismissFromUI() {
+        if statusType == .progress {
+            progressCancelAction?()
+        }
+        hide()
     }
     
     deinit {

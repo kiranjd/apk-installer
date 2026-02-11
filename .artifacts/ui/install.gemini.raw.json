@@ -1,0 +1,20 @@
+{
+"screen": "Install",
+"score": 7,
+"top_issues": [
+"Inconsistent Layout Paradigms: The 'ADB' section uses a free-form layout, while the 'Device' and 'Fallback' sections use a 'grouped row' style (dark background containers). This mixture of UI patterns feels disjointed.",
+"Redundant Labeling: In the 'Package ID fallback' section, the row label is 'com.example.app', which duplicates the placeholder/value. The label should describe the field (e.g., 'Bundle ID' or 'Package Name').",
+"Visual Hierarchy: The green 'ADB found and working' banner is visually heavy and dominant for a settings screen, distracting from the actual controls.",
+"Sidebar Iconography: The icons in the sidebar appear slightly heavy/bold compared to standard macOS SF Symbols, making the sidebar feel less native."
+],
+"top_fixes": [
+"Unify the layout: Either move the ADB controls into 'grouped rows' to match the bottom sections, or (preferred for macOS) remove the dark background containers from the bottom sections and use standard aligned controls.",
+"Rename the label in the bottom section from 'com.example.app' to 'Package Name' or 'Default ID' to provide context.",
+"Redesign the ADB status to be a subtle indicator (e.g., a green dot or small checkmark icon next to the path) rather than a large banner.",
+"Ensure sidebar icons use standard SF Symbol weights (usually Medium or Regular) to match macOS norms."
+],
+"quick_wins": [
+"Change the text label 'com.example.app' to 'Package Name'.",
+"Add slightly more spacing between the 'Detect' and 'Choose...' buttons."
+]
+}

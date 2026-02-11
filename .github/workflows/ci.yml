@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sanitization checks
+        run: |
+          set -euo pipefail
+          if rg -n "\\bMPL\\b|\\bkiran\\b|CERT_PASSWORD" app scripts config README.md CONTRIBUTING.md SECURITY.md docs LICENSE .github/workflows; then
+            echo "Disallowed personal trace found."
+            exit 1
+          fi
+          if git ls-files | rg "(\\.cer$|\\.p12$|xcuserdata|xcuserstate)"; then
+            echo "Disallowed artifact tracked in git."
+            exit 1
+          fi
+
+      - name: Build
+        run: |
+          xcodebuild \
+            -project APKInstaller.xcodeproj \
+            -scheme APKInstaller \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Test
+        run: |
+          xcodebuild \
+            -project APKInstaller.xcodeproj \
+            -scheme APKInstaller \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            test

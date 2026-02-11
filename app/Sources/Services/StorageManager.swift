@@ -1,106 +1,101 @@
 import Foundation
 
 enum StorageManager {
-    static let adbPathKey = "adb_path"
-    static let locationsKey = "saved_apk_locations"
-    static let lastSelectedLocationKey = "last_selected_location_path"
-    static let bundleSourceKey = "bundle_source_path"
-    static let bundleIosDestKey = "bundle_ios_dest_path"
-    static let bundleAndroidDestKey = "bundle_android_dest_path"
-    static let sourceBookmarkKey = "bundle_source_bookmark"
-    static let destBookmarkKey = "bundle_dest_bookmark"
-    static let appIdentifierKey = "app_identifier"
-    static let deviceSelectorEnabledKey = "device_selector_enabled"
-    
+    private static let adbPathKey = "adb_path"
+    private static let locationsKey = "saved_apk_locations"
+    private static let lastSelectedLocationKey = "last_selected_location_path"
+    private static let appIdentifierKey = "app_identifier"
+    private static let deviceSelectorEnabledKey = "device_selector_enabled"
+    private static let lastInstalledAPKPathKey = "last_installed_apk_path"
+    private static let lastInstalledAtKey = "last_installed_at"
+
     static func saveADBPath(_ path: String) {
         UserDefaults.standard.set(path, forKey: adbPathKey)
     }
-    
+
     static func loadADBPath() -> String? {
-        return UserDefaults.standard.string(forKey: adbPathKey)
+        guard let rawValue = UserDefaults.standard.string(forKey: adbPathKey) else {
+            return nil
+        }
+
+        let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else {
+            clearADBPath()
+            return nil
+        }
+
+        // Keep command-name inputs (e.g. "adb"), but sanitize stale absolute paths.
+        if value.contains("/") {
+            let expandedPath = (value as NSString).expandingTildeInPath
+            guard FileManager.default.fileExists(atPath: expandedPath) else {
+                clearADBPath()
+                return nil
+            }
+            return expandedPath
+        }
+
+        return value
     }
-    
+
+    static func clearADBPath() {
+        UserDefaults.standard.removeObject(forKey: adbPathKey)
+    }
+
     static func saveAppIdentifier(_ identifier: String) {
         UserDefaults.standard.set(identifier, forKey: appIdentifierKey)
     }
 
-    /// Persist whether manual device selector is enabled.
+    static func loadAppIdentifier() -> String {
+        guard let value = UserDefaults.standard.string(forKey: appIdentifierKey), !value.isEmpty else {
+            return AppConfig.defaultAppIdentifier
+        }
+
+        // Legacy builds shipped with a personal default package that ended in ".androidapp".
+        if value.hasSuffix(".androidapp") {
+            return AppConfig.defaultAppIdentifier
+        }
+
+        return value
+    }
+
     static func saveDeviceSelectorEnabled(_ enabled: Bool) {
         UserDefaults.standard.set(enabled, forKey: deviceSelectorEnabledKey)
     }
-    
-    static func loadAppIdentifier() -> String {
-        return UserDefaults.standard.string(forKey: appIdentifierKey) ?? "com.mpl.androidapp"
+
+    static func loadDeviceSelectorEnabled() -> Bool {
+        guard UserDefaults.standard.object(forKey: deviceSelectorEnabledKey) != nil else {
+            return true
+        }
+        return UserDefaults.standard.bool(forKey: deviceSelectorEnabledKey)
     }
 
-    /// Load persisted device selector setting, defaulting to enabled if not set.
-    static func loadDeviceSelectorEnabled() -> Bool {
-        if UserDefaults.standard.object(forKey: deviceSelectorEnabledKey) != nil {
-            return UserDefaults.standard.bool(forKey: deviceSelectorEnabledKey)
-        }
-        return true
-    }
-    
     static func saveLocations(_ locations: [APKLocation]) {
-        if let encoded = try? JSONEncoder().encode(locations) {
-            UserDefaults.standard.set(encoded, forKey: locationsKey)
-        }
+        guard let encoded = try? JSONEncoder().encode(locations) else { return }
+        UserDefaults.standard.set(encoded, forKey: locationsKey)
     }
-    
+
     static func loadLocations() -> [APKLocation] {
         if let data = UserDefaults.standard.data(forKey: locationsKey),
            let decoded = try? JSONDecoder().decode([APKLocation].self, from: data) {
             return decoded
         }
+
+        // Migration path: older builds (and some local dev workflows) stored an array
+        // of folder paths (String) instead of JSON-encoded [APKLocation].
+        if let rawPaths = UserDefaults.standard.array(forKey: locationsKey) as? [String] {
+            let locations = rawPaths
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .map { APKLocation(path: $0) }
+            if !locations.isEmpty {
+                saveLocations(locations)
+            }
+            return locations
+        }
+
         return []
     }
-    
-    static func saveBundlePaths(source: String, iosDest: String, androidDest: String) {
-        UserDefaults.standard.set(source, forKey: bundleSourceKey)
-        UserDefaults.standard.set(iosDest, forKey: bundleIosDestKey)
-        UserDefaults.standard.set(androidDest, forKey: bundleAndroidDestKey)
-    }
-    
-    static func loadBundlePaths() -> (source: String?, iosDest: String?, androidDest: String?) {
-        let source = UserDefaults.standard.string(forKey: bundleSourceKey)
-        let iosDest = UserDefaults.standard.string(forKey: bundleIosDestKey)
-        let androidDest = UserDefaults.standard.string(forKey: bundleAndroidDestKey)
-        return (source, iosDest, androidDest)
-    }
-    
-    static func saveBookmark(for url: URL, isSource: Bool) throws {
-        let bookmarkKey = isSource ? sourceBookmarkKey : destBookmarkKey
-        let data = try url.bookmarkData(options: .withSecurityScope,
-                                       includingResourceValuesForKeys: nil,
-                                       relativeTo: nil)
-        UserDefaults.standard.set(data, forKey: bookmarkKey)
-    }
-    
-    static func resolveBookmark(isSource: Bool) -> URL? {
-        let bookmarkKey = isSource ? sourceBookmarkKey : destBookmarkKey
-        guard let data = UserDefaults.standard.data(forKey: bookmarkKey) else { return nil }
-        
-        var isStale = false
-        do {
-            let url = try URL(resolvingBookmarkData: data,
-                             options: .withSecurityScope,
-                             relativeTo: nil,
-                             bookmarkDataIsStale: &isStale)
-            return url
-        } catch {
-            print("Failed to resolve bookmark: \(error)")
-            return nil
-        }
-    }
-    
-    static func restoreSecurityScopedAccess(for url: URL) -> Bool {
-        let success = url.startAccessingSecurityScopedResource()
-        if !success {
-            print("⚠️ Failed to access security-scoped resource: \(url.path)")
-        }
-        return success
-    }
-    
+
     static func saveLastSelectedLocation(_ location: APKLocation?) {
         if let path = location?.path {
             UserDefaults.standard.set(path, forKey: lastSelectedLocationKey)
@@ -108,8 +103,42 @@ enum StorageManager {
             UserDefaults.standard.removeObject(forKey: lastSelectedLocationKey)
         }
     }
-    
+
     static func loadLastSelectedLocation() -> String? {
-        return UserDefaults.standard.string(forKey: lastSelectedLocationKey)
+        UserDefaults.standard.string(forKey: lastSelectedLocationKey)
     }
-} 
+
+    static func saveLastInstalledAPKPath(_ path: String?) {
+        if let path, !path.isEmpty {
+            UserDefaults.standard.set(path, forKey: lastInstalledAPKPathKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: lastInstalledAPKPathKey)
+        }
+    }
+
+    static func loadLastInstalledAPKPath() -> String? {
+        UserDefaults.standard.string(forKey: lastInstalledAPKPathKey)
+    }
+
+    static func saveLastInstalledAt(_ date: Date?) {
+        if let date {
+            UserDefaults.standard.set(date, forKey: lastInstalledAtKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: lastInstalledAtKey)
+        }
+    }
+
+    static func loadLastInstalledAt() -> Date? {
+        UserDefaults.standard.object(forKey: lastInstalledAtKey) as? Date
+    }
+
+    static func resetAll() {
+        clearADBPath()
+        UserDefaults.standard.removeObject(forKey: locationsKey)
+        UserDefaults.standard.removeObject(forKey: lastSelectedLocationKey)
+        UserDefaults.standard.removeObject(forKey: appIdentifierKey)
+        UserDefaults.standard.removeObject(forKey: deviceSelectorEnabledKey)
+        UserDefaults.standard.removeObject(forKey: lastInstalledAPKPathKey)
+        UserDefaults.standard.removeObject(forKey: lastInstalledAtKey)
+    }
+}

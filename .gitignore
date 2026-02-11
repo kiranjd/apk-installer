@@ -1,4 +1,18 @@
-# Ignore build artifacts directory and macOS system files
+# Build and packaging artifacts
 build/
+dist/
+DerivedData/
+*.dmg
+
+# macOS and Xcode user state
 .DS_Store
-DevTools.dmg
+**/xcuserdata/
+*.xcuserstate
+
+# Signing material (never commit)
+*.p12
+*.cer
+*.mobileprovision
+
+# Local runtime output
+*.log
