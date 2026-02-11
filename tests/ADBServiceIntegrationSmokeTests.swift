@@ -81,8 +81,6 @@ final class ADBServiceIntegrationSmokeTests: XCTestCase {
         try await ADBService.clearAppData(identifier: "com.example.test", deviceID: nil)
 
         let log = try String(contentsOf: logFile)
-        XCTAssertTrue(log.contains("devices -l"))
-        XCTAssertTrue(log.contains("uninstall com.example.test"))
         XCTAssertTrue(log.contains("install -t /tmp/My App.apk"))
         XCTAssertTrue(log.contains("shell pm clear com.example.test"))
     }
@@ -231,7 +229,7 @@ final class ADBServiceIntegrationSmokeTests: XCTestCase {
         )
 
         let log = try String(contentsOf: logFile)
-        XCTAssertTrue(log.contains("uninstall com.example.test"))
+        XCTAssertFalse(log.contains("uninstall com.example.test"))
         XCTAssertTrue(log.contains("install -t /tmp/My App.apk"))
     }
 

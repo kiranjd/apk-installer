@@ -38,5 +38,6 @@ jobs:
             -project APKInstaller.xcodeproj \
             -scheme APKInstaller \
             -configuration Debug \
+            -parallel-testing-enabled NO \
             CODE_SIGNING_ALLOWED=NO \
             test
