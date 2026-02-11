@@ -17,7 +17,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate release secrets
+      - name: Check release secrets
+        id: release_secrets
         env:
           CERT_P12_B64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
           CERT_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -26,14 +27,22 @@ jobs:
           NOTARY_APP_PASSWORD: ${{ secrets.APPLE_NOTARY_APP_PASSWORD }}
         run: |
           set -euo pipefail
+          missing=()
           for name in CERT_P12_B64 CERT_PASSWORD TEAM_ID NOTARY_APPLE_ID NOTARY_APP_PASSWORD; do
             if [ -z "${!name:-}" ]; then
-              echo "Missing required secret: $name"
-              exit 1
+              missing+=("$name")
             fi
           done
 
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "skip_release=1" >> "$GITHUB_OUTPUT"
+            echo "::warning::Skipping signed release build. Missing secrets: ${missing[*]}"
+          else
+            echo "skip_release=0" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Import Developer ID certificate
+        if: steps.release_secrets.outputs.skip_release != '1'
         env:
           CERT_P12_B64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
           CERT_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -56,6 +65,7 @@ jobs:
           security list-keychains -d user -s "$KEYCHAIN_PATH"
 
       - name: Configure notarytool profile
+        if: steps.release_secrets.outputs.skip_release != '1'
         env:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
@@ -68,6 +78,7 @@ jobs:
             --password "$NOTARY_APP_PASSWORD"
 
       - name: Build, sign, notarize DMG
+        if: steps.release_secrets.outputs.skip_release != '1'
         env:
           DEVELOPER_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           NOTARIZE: "1"
@@ -78,6 +89,7 @@ jobs:
           ./scripts/release_sign.sh
 
       - name: Prepare release assets
+        if: steps.release_secrets.outputs.skip_release != '1'
         run: |
           set -euo pipefail
           TAG_NAME="${GITHUB_REF_NAME}"
@@ -85,6 +97,7 @@ jobs:
           shasum -a 256 "dist/APKInstaller-${TAG_NAME}.dmg" > "dist/APKInstaller-${TAG_NAME}.dmg.sha256"
 
       - name: Publish GitHub release
+        if: steps.release_secrets.outputs.skip_release != '1'
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -92,8 +105,12 @@ jobs:
             dist/APKInstaller-${{ github.ref_name }}.dmg.sha256
           generate_release_notes: true
 
+      - name: Release skipped (secrets not configured)
+        if: steps.release_secrets.outputs.skip_release == '1'
+        run: echo "Release workflow completed without publishing artifacts."
+
       - name: Cleanup keychain
-        if: always()
+        if: always() && steps.release_secrets.outputs.skip_release != '1'
         run: |
           set -euo pipefail
           if [ -n "${KEYCHAIN_PATH:-}" ]; then
