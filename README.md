@@ -4,8 +4,9 @@
 
 ## Demo Video
 
-- APK Installer walkthrough: [apk-installer.mp4](https://github.com/kiranjd/apk-installer/releases/download/media-2026-02-12/apk-installer.mp4)
-- Tracking issue: [#1](https://github.com/kiranjd/apk-installer/issues/1)
+https://github.com/kiranjd/apk-installer/releases/download/media-2026-02-12/apk-installer.mp4
+
+Tracking issue: [#1](https://github.com/kiranjd/apk-installer/issues/1)
 
 ## Features
 
