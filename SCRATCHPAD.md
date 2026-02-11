@@ -33,3 +33,9 @@
 - Test isolation guardrail: integration tests must never write `adb_path` in app defaults; use `APKINSTALLER_ADB_PATH_OVERRIDE` env var for fake adb.
 - User workflow preference: always kill existing APKInstaller process before building and launching a new debug build.
 - UX preference: app launch after install/update is best-effort background behavior; do not show an "Opening app…" progress stage or include launch status in success toast.
+- Reliability guardrail: every install/update attempt should emit a timestamped command trace file under `~/Library/Logs/APKInstaller/installs/` (adb + aapt/apkanalyzer + stage transitions + outcome).
+- Logging guardrail: install/update trace log must flush per-line during execution so live tailing shows stalls immediately; include elapsed delta per line.
+- Reliability guardrail: never run blocking pipe reads in MainActor-inherited Task; use background-queue async readers so command timeouts (e.g., adb uninstall) can still fire.
+- UX guardrail: when user taps cancel on install/update, stop row flashing animation immediately (don’t wait for ADB command teardown).
+- Core-path guardrail: install/update pipeline must hard-timeout and fail fast (120s budget) rather than chaining optional waits indefinitely.
+- Core-path guardrail: never preflight every adb command with `adb start-server`; execute target adb command directly to avoid daemon-bootstrap hangs blocking install/update.

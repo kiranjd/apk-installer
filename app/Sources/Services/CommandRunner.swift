@@ -77,9 +77,9 @@ enum CommandRunner {
         }
 
         // Drain stdout/stderr concurrently while process is running.
-        // Waiting for process exit before reading can deadlock on full pipe buffers.
-        let stdoutTask = Task { stdoutPipe.fileHandleForReading.readDataToEndOfFile() }
-        let stderrTask = Task { stderrPipe.fileHandleForReading.readDataToEndOfFile() }
+        // Read on a background queue so a MainActor caller cannot block timeouts/cancellation.
+        let stdoutTask = Task { await readDataToEndAsync(stdoutPipe.fileHandleForReading) }
+        let stderrTask = Task { await readDataToEndAsync(stderrPipe.fileHandleForReading) }
 
         let terminationTask = Task { () throws -> CommandResult in
             let exitCode = await withCheckedContinuation { continuation in
@@ -180,6 +180,15 @@ enum CommandRunner {
             let result = try await group.next()!
             group.cancelAll()
             return result
+        }
+    }
+
+    private static func readDataToEndAsync(_ fileHandle: FileHandle) async -> Data {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                let data = fileHandle.readDataToEndOfFile()
+                continuation.resume(returning: data)
+            }
         }
     }
 

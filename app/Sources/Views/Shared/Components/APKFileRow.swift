@@ -229,9 +229,15 @@ struct APKFileRow: View {
         installTask?.cancel()
         isInstallTaskRunning = true
         animatingGradient = true
+        var installLogPath: String?
 
         let cancelAction: () -> Void = {
             Task { @MainActor in
+                // Cancel is user intent; stop row animation immediately even if ADB teardown lags.
+                animatingGradient = false
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isHovered = false
+                }
                 installTask?.cancel()
             }
         }
@@ -268,7 +274,7 @@ struct APKFileRow: View {
                 ?? ready.first?.id
             
             do {
-                _ = try await ADBService.installAPK(
+                let result = try await ADBService.installAPK(
                     path: file.path,
                     isUpdate: isUpdate,
                     deviceID: targetDevice,
@@ -281,6 +287,9 @@ struct APKFileRow: View {
                                 onCancel: cancelAction
                             )
                         }
+                    },
+                    onLogReady: { path in
+                        installLogPath = path
                     }
                 )
                 try Task.checkCancellation()
@@ -294,31 +303,51 @@ struct APKFileRow: View {
                     )
                 }
                 await MainActor.run {
-                    let completionMessage = "\(isUpdate ? "Updated" : "Installed") \(file.name)"
+                    var completionMessage = "\(isUpdate ? "Updated" : "Installed") \(file.name)"
+                    let resolvedLogPath = result.installLogPath ?? installLogPath
+                    if let resolvedLogPath {
+                        completionMessage += " • Log: \(resolvedLogPath)"
+                    }
                     statusViewModel.showMessage(completionMessage, type: .success)
                     playCompletionSound()
                 }
             } catch let commandError as CommandRunnerError {
                 if case .cancelled = commandError {
+                    let logSuffix = installLogSuffix(explicitPath: installLogPath, error: commandError)
                     await MainActor.run {
-                        statusViewModel.showMessage("\(isUpdate ? "Update" : "Install") canceled for \(file.name)", type: .info)
+                        statusViewModel.showMessage("\(isUpdate ? "Update" : "Install") canceled for \(file.name)\(logSuffix)", type: .info)
                     }
                 } else {
+                    let logSuffix = installLogSuffix(explicitPath: installLogPath, error: commandError)
                     await MainActor.run {
-                        statusViewModel.showMessage("Failed to \(isUpdate ? "update" : "install") \(file.name): \(commandError.localizedDescription)", type: .error)
+                        statusViewModel.showMessage("Failed to \(isUpdate ? "update" : "install") \(file.name): \(commandError.localizedDescription)\(logSuffix)", type: .error)
                     }
                 }
             } catch is CancellationError {
+                let logSuffix = installLogSuffix(explicitPath: installLogPath, error: nil)
                 await MainActor.run {
-                    statusViewModel.showMessage("\(isUpdate ? "Update" : "Install") canceled for \(file.name)", type: .info)
+                    statusViewModel.showMessage("\(isUpdate ? "Update" : "Install") canceled for \(file.name)\(logSuffix)", type: .info)
                 }
             } catch {
+                let logSuffix = installLogSuffix(explicitPath: installLogPath, error: error)
                 await MainActor.run {
-                    statusViewModel.showMessage("Failed to \(isUpdate ? "update" : "install") \(file.name): \(error.localizedDescription)", type: .error)
+                    statusViewModel.showMessage("Failed to \(isUpdate ? "update" : "install") \(file.name): \(error.localizedDescription)\(logSuffix)", type: .error)
                 }
             }
         }
         installTask = task
+    }
+
+    private func installLogSuffix(explicitPath: String?, error: Error?) -> String {
+        if let explicitPath, !explicitPath.isEmpty {
+            return " • Log: \(explicitPath)"
+        }
+        if let error,
+           let path = (error as NSError).userInfo[ADBService.installLogPathUserInfoKey] as? String,
+           !path.isEmpty {
+            return " • Log: \(path)"
+        }
+        return ""
     }
 
     // MARK: - Three-dots menu button (replaces Open)

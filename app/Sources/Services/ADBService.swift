@@ -39,11 +39,16 @@ struct ADBPathDetectionReport {
 struct ADBInstallResult {
     let packageIdentifier: String?
     let didRemoveExisting: Bool
+    let installLogPath: String?
 }
 
 enum ADBService {
     private static let logger = Logger(subsystem: "io.github.apkinstaller.mac", category: "ADBService")
     static let checkedPathsUserInfoKey = "checked_paths"
+    static let installLogPathUserInfoKey = "install_log_path"
+
+    @TaskLocal
+    private static var activeInstallLogger: InstallOperationLogger?
 
     static func detectADBPath() async -> String? {
         let report = await detectADBPathWithReport()
@@ -85,57 +90,84 @@ enum ADBService {
         isUpdate: Bool,
         deviceID: String?,
         fallbackPackageIdentifier: String,
-        onProgress: ((String) async -> Void)? = nil
+        onProgress: ((String) async -> Void)? = nil,
+        onLogReady: ((String) async -> Void)? = nil
     ) async throws -> ADBInstallResult {
-        let adbExecutable = try await adbExecutablePath()
-
-        let installedPackagesBefore = try? await installedPackagePaths(deviceID: deviceID, executable: adbExecutable)
-
-        await onProgress?("Resolving package ID…")
-
-        let trimmedFallback = normalizedFallbackPackageIdentifier(fallbackPackageIdentifier)
-        let resolvedPackageIdentifier: String?
-        var packageResolutionError: Error?
-        do {
-            let inferred = try await packageIdentifier(from: path)
-            resolvedPackageIdentifier = inferred.isEmpty ? nil : inferred
-        } catch {
-            packageResolutionError = error
-            logger.error("Package ID resolution failed for APK '\(path, privacy: .public)': \(error.localizedDescription, privacy: .public)")
-            if let trimmedFallback {
-                resolvedPackageIdentifier = trimmedFallback
-            } else {
-                resolvedPackageIdentifier = nil
-            }
+        let operationLogger = InstallOperationLogger.make(apkPath: path, isUpdate: isUpdate, deviceID: deviceID)
+        let logPath = operationLogger?.logFilePath
+        if let logPath {
+            await onLogReady?(logPath)
         }
 
-        if !isUpdate, resolvedPackageIdentifier == nil {
-            if let packageResolutionError {
-                throw packageResolutionFailure(error: packageResolutionError, apkPath: path)
-            }
-            throw NSError(
-                domain: "ADBService",
-                code: 3,
-                userInfo: [
-                    NSLocalizedDescriptionKey: "Could not resolve package ID from APK. Install Android build-tools (aapt/aapt2) or set a Package ID override in Settings."
-                ]
+        return try await runInstallWithLogger(
+            operationLogger,
+            apkPath: path,
+            isUpdate: isUpdate,
+            deviceID: deviceID,
+            fallbackPackageIdentifier: fallbackPackageIdentifier,
+            onProgress: onProgress
+        )
+    }
+
+    private static func runInstallWithLogger(
+        _ operationLogger: InstallOperationLogger?,
+        apkPath: String,
+        isUpdate: Bool,
+        deviceID: String?,
+        fallbackPackageIdentifier: String,
+        onProgress: ((String) async -> Void)?
+    ) async throws -> ADBInstallResult {
+        let execute = {
+            try await executeInstallAPK(
+                path: apkPath,
+                isUpdate: isUpdate,
+                deviceID: deviceID,
+                fallbackPackageIdentifier: fallbackPackageIdentifier,
+                onProgress: onProgress,
+                installLogPath: operationLogger?.logFilePath
             )
         }
 
-        var didRemoveExisting = false
-        if !isUpdate,
-           let resolvedPackageIdentifier {
-            await onProgress?("Removing existing app (\(resolvedPackageIdentifier))…")
+        guard let operationLogger else {
+            return try await execute()
+        }
+
+        return try await $activeInstallLogger.withValue(operationLogger) {
+            await operationLogger.recordStart(
+                apkPath: apkPath,
+                isUpdate: isUpdate,
+                deviceID: deviceID,
+                fallbackPackageIdentifier: fallbackPackageIdentifier
+            )
             do {
-                didRemoveExisting = try await uninstallIfPresent(
-                    identifier: resolvedPackageIdentifier,
-                    deviceID: deviceID,
-                    executable: adbExecutable
-                )
+                let result = try await execute()
+                await operationLogger.recordOutcome("SUCCESS")
+                await operationLogger.close()
+                return result
             } catch {
-                throw contextualizedInstallError(error, stage: "Uninstall existing app")
+                if error is CancellationError || isCommandCancellation(error) {
+                    await operationLogger.recordOutcome("CANCELLED", detail: error.localizedDescription)
+                    await operationLogger.close()
+                    throw error
+                }
+
+                await operationLogger.recordOutcome("FAILED", detail: error.localizedDescription)
+                await operationLogger.close()
+                throw attachInstallLogPath(error, logPath: operationLogger.logFilePath)
             }
         }
+    }
+
+    private static func executeInstallAPK(
+        path: String,
+        isUpdate: Bool,
+        deviceID: String?,
+        fallbackPackageIdentifier: String,
+        onProgress: ((String) async -> Void)?,
+        installLogPath: String?
+    ) async throws -> ADBInstallResult {
+        let adbExecutable = try await adbExecutablePath()
+        let trimmedFallback = normalizedFallbackPackageIdentifier(fallbackPackageIdentifier)
 
         var arguments: [String] = []
         if let deviceID {
@@ -148,46 +180,104 @@ enum ADBService {
         }
         arguments.append(path)
 
-        await onProgress?(isUpdate ? "Updating existing app…" : "Installing new app…")
+        await reportProgress(isUpdate ? "Updating existing app…" : "Installing new app…", onProgress: onProgress)
         do {
-            _ = try await runADBWithTransientDeviceRetry(
-                arguments: arguments,
-                executable: adbExecutable,
-                timeout: 90
-            )
+            try await withInstallDeadline(seconds: 120, stage: isUpdate ? "Update APK" : "Install APK") {
+                let initialInstallResult = try await runADBWithTransientDeviceRetry(
+                    arguments: arguments,
+                    executable: adbExecutable,
+                    timeout: 90,
+                    allowNonZeroExit: true
+                )
+
+                if initialInstallResult.exitCode != 0 {
+                    let lowered = initialInstallResult.combinedOutput.lowercased()
+                    let shouldRetryWithReplace = !isUpdate && (
+                        lowered.contains("install_failed_already_exists")
+                            || lowered.contains("install_failed_update_incompatible")
+                    )
+
+                    if shouldRetryWithReplace {
+                        var replaceArguments: [String] = []
+                        if let deviceID {
+                            replaceArguments.append(contentsOf: ["-s", deviceID])
+                        }
+                        replaceArguments.append(contentsOf: ["install", "-t", "-r", path])
+                        await reportProgress("Installing app (replace mode)…", onProgress: onProgress)
+
+                        let replaceResult = try await runADBWithTransientDeviceRetry(
+                            arguments: replaceArguments,
+                            executable: adbExecutable,
+                            timeout: 90,
+                            allowNonZeroExit: true
+                        )
+                        guard replaceResult.exitCode == 0 else {
+                            throw CommandRunnerError.nonZeroExit(
+                                executable: ([adbExecutable] + replaceArguments).joined(separator: " "),
+                                exitCode: replaceResult.exitCode,
+                                output: replaceResult.combinedOutput
+                            )
+                        }
+                    } else {
+                        throw CommandRunnerError.nonZeroExit(
+                            executable: ([adbExecutable] + arguments).joined(separator: " "),
+                            exitCode: initialInstallResult.exitCode,
+                            output: initialInstallResult.combinedOutput
+                        )
+                    }
+                }
+            }
         } catch {
             throw contextualizedInstallError(error, stage: isUpdate ? "Update APK" : "Install APK")
         }
 
-        let launchIdentifier: String?
-        if let inferred = resolvedPackageIdentifier {
-            launchIdentifier = inferred
-        } else if let before = installedPackagesBefore,
-                  let after = try? await installedPackagePaths(deviceID: deviceID, executable: adbExecutable),
-                  let detected = detectChangedPackageIdentifier(before: before, after: after) {
-            launchIdentifier = detected
-        } else if let trimmedFallback {
-            launchIdentifier = trimmedFallback
-        } else {
-            launchIdentifier = nil
-        }
-
-        if let launchIdentifier {
-            let launchExecutable = adbExecutable
-            let launchDeviceID = deviceID
-            Task.detached(priority: .utility) {
-                _ = try? await launchApp(
-                    identifier: launchIdentifier,
-                    deviceID: launchDeviceID,
-                    executable: launchExecutable
-                )
+        // Keep core path strict: install/update must complete without waiting on peripheral work.
+        // Any package-id resolution and app launch are best-effort, detached post-success tasks.
+        let launchExecutable = adbExecutable
+        let launchDeviceID = deviceID
+        let launchLogger = activeInstallLogger
+        let launchFallbackIdentifier = trimmedFallback
+        let launchAPKPath = path
+        Task.detached(priority: .utility) {
+            var launchIdentifier = launchFallbackIdentifier
+            if let resolved = try? await packageIdentifier(from: launchAPKPath),
+               !resolved.isEmpty {
+                launchIdentifier = resolved
             }
+
+            guard let launchIdentifier else { return }
+            await launchLogger?.recordProgress("Best-effort launch for \(launchIdentifier)")
+            _ = try? await launchApp(
+                identifier: launchIdentifier,
+                deviceID: launchDeviceID,
+                executable: launchExecutable
+            )
         }
 
         return ADBInstallResult(
-            packageIdentifier: launchIdentifier,
-            didRemoveExisting: didRemoveExisting
+            packageIdentifier: nil,
+            didRemoveExisting: false,
+            installLogPath: installLogPath
         )
+    }
+
+    private static func withInstallDeadline(
+        seconds: TimeInterval,
+        stage: String,
+        operation: @escaping () async throws -> Void
+    ) async throws {
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask {
+                try await operation()
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw CommandRunnerError.timedOut(executable: stage, timeout: seconds)
+            }
+
+            _ = try await group.next()
+            group.cancelAll()
+        }
     }
 
     static func clearAppData(identifier: String, deviceID: String?) async throws {
@@ -206,7 +296,7 @@ enum ADBService {
         let environment = runtimeEnvironment()
         do {
             let aaptExecutable = detectAAPTPath(environment: environment)
-            let result = try await CommandRunner.run(
+            let result = try await runLoggedCommand(
                 executable: aaptExecutable,
                 arguments: ["dump", "badging", apkPath],
                 environment: environment,
@@ -222,7 +312,7 @@ enum ADBService {
             }
 
             if let apkanalyzer = detectApkAnalyzerPath(environment: environment) {
-                let result = try await CommandRunner.run(
+                let result = try await runLoggedCommand(
                     executable: apkanalyzer,
                     arguments: ["manifest", "application-id", apkPath],
                     environment: environment,
@@ -540,21 +630,54 @@ enum ADBService {
         timeout: TimeInterval,
         allowNonZeroExit: Bool = false
     ) async throws -> CommandResult {
-        // Ensure daemon is up for GUI-launched app environments where no server exists yet.
-        _ = try? await CommandRunner.run(
-            executable: executable,
-            arguments: ["start-server"],
-            environment: runtimeEnvironment(),
-            timeout: 10
-        )
-
-        return try await CommandRunner.run(
+        // Core reliability: do not preflight with `adb start-server` because it can hang and
+        // block the actual operation. `adb <command>` already starts the daemon if needed.
+        return try await runLoggedCommand(
             executable: executable,
             arguments: arguments,
             environment: runtimeEnvironment(),
             timeout: timeout,
             allowNonZeroExit: allowNonZeroExit
         )
+    }
+
+    private static func runLoggedCommand(
+        executable: String,
+        arguments: [String],
+        environment: [String: String],
+        timeout: TimeInterval,
+        allowNonZeroExit: Bool = false
+    ) async throws -> CommandResult {
+        let commandLabel = ([executable] + arguments).joined(separator: " ")
+        let start = Date()
+        await activeInstallLogger?.recordCommandStart(command: commandLabel, timeout: timeout)
+        do {
+            let result = try await CommandRunner.run(
+                executable: executable,
+                arguments: arguments,
+                environment: environment,
+                timeout: timeout,
+                allowNonZeroExit: allowNonZeroExit
+            )
+            await activeInstallLogger?.recordCommandResult(
+                command: commandLabel,
+                duration: Date().timeIntervalSince(start),
+                result: result
+            )
+            return result
+        } catch {
+            await activeInstallLogger?.recordCommandFailure(
+                command: commandLabel,
+                duration: Date().timeIntervalSince(start),
+                error: error
+            )
+            throw error
+        }
+    }
+
+    private static func reportProgress(_ message: String, onProgress: ((String) async -> Void)?) async {
+        await onProgress?(message)
+        await activeInstallLogger?.recordProgress(message)
     }
 
     private static func runtimeEnvironment() -> [String: String] {
@@ -629,7 +752,7 @@ enum ADBService {
         }
 
         do {
-            _ = try await CommandRunner.run(
+            _ = try await runLoggedCommand(
                 executable: executable,
                 arguments: ["version"],
                 environment: environment,
@@ -707,7 +830,7 @@ enum ADBService {
         executable: String,
         environment: [String: String]
     ) async throws -> String {
-        let result = try await CommandRunner.run(
+        let result = try await runLoggedCommand(
             executable: executable,
             arguments: ["dump", "badging", apkPath],
             environment: environment,
@@ -793,6 +916,33 @@ enum ADBService {
         guard !trimmed.isEmpty else { return nil }
         guard trimmed != AppConfig.defaultAppIdentifier else { return nil }
         return trimmed
+    }
+
+    private static func isCommandCancellation(_ error: Error) -> Bool {
+        if case CommandRunnerError.cancelled = error {
+            return true
+        }
+        return false
+    }
+
+    private static func attachInstallLogPath(_ error: Error, logPath: String) -> Error {
+        let nsError = error as NSError
+        var userInfo = nsError.userInfo
+        userInfo[installLogPathUserInfoKey] = logPath
+
+        if userInfo[NSLocalizedDescriptionKey] == nil {
+            userInfo[NSLocalizedDescriptionKey] = nsError.localizedDescription
+        }
+
+        if userInfo[NSUnderlyingErrorKey] == nil {
+            userInfo[NSUnderlyingErrorKey] = nsError
+        }
+
+        return NSError(
+            domain: nsError.domain,
+            code: nsError.code,
+            userInfo: userInfo
+        )
     }
 
     private static func contextualizedInstallError(_ error: Error, stage: String) -> Error {
