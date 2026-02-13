@@ -4,13 +4,7 @@
 
 Latest installable release: [GitHub Releases](https://github.com/kiranjd/apk-installer/releases/latest)
 
-## Demo Video
-
-<video src="https://github.com/kiranjd/apk-installer/releases/download/media-2026-02-12/apk-installer.mp4" controls muted playsinline preload="metadata"></video>
-
-Direct link: [Download demo video](https://github.com/kiranjd/apk-installer/releases/download/media-2026-02-12/apk-installer.mp4)
-
-Tracking issue: [#1](https://github.com/kiranjd/apk-installer/issues/1)
+https://github.com/user-attachments/assets/fe875a6d-88c4-48c9-b388-22a0ed7c4c5d
 
 ## Features
 
