@@ -6,16 +6,7 @@ Latest installable release: [GitHub Releases](https://github.com/kiranjd/apk-ins
 
 ## Demo Video
 
-<video
-  src="https://github.com/kiranjd/apk-installer/releases/download/media-2026-02-12/apk-installer.mp4"
-  controls
-  muted
-  playsinline
-  preload="metadata"
->
-  Your browser does not support embedded video.
-  <a href="https://github.com/kiranjd/apk-installer/releases/download/media-2026-02-12/apk-installer.mp4">Download the demo video</a>.
-</video>
+<video src="https://github.com/kiranjd/apk-installer/releases/download/media-2026-02-12/apk-installer.mp4" controls muted playsinline preload="metadata"></video>
 
 Direct link: [Download demo video](https://github.com/kiranjd/apk-installer/releases/download/media-2026-02-12/apk-installer.mp4)
 
