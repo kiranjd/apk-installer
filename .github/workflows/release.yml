@@ -83,7 +83,6 @@ jobs:
           DEVELOPER_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           NOTARIZE: "1"
           NOTARYTOOL_PROFILE: ci-notary
-          PREFER_VIBECODE_CERT: "0"
         run: |
           set -euo pipefail
           ./scripts/release_sign.sh

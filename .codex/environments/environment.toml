@@ -10,7 +10,13 @@ name = "Run"
 icon = "run"
 command = '''
 pkill -x APKInstaller || true
-cd /Users/jd/things/apk-installer
-nohup /Users/jd/Library/Android/sdk/emulator/emulator -avd APKInstaller_API34 >/tmp/apkinstaller-emulator.log 2>&1 &
-./scripts/build_local.sh && open -na /Users/jd/things/apk-installer/DerivedData/Build/Products/Debug/APKInstaller.app
+cd "$(git rev-parse --show-toplevel)"
+SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/Library/Android/sdk}}"
+EMULATOR_BIN="${APKINSTALLER_EMULATOR_BIN:-$SDK_ROOT/emulator/emulator}"
+if [[ -x "$EMULATOR_BIN" ]]; then
+  nohup "$EMULATOR_BIN" -avd "${APKINSTALLER_AVD:-APKInstaller_API34}" >/tmp/apkinstaller-emulator.log 2>&1 &
+else
+  echo "Skipping emulator launch: set APKINSTALLER_EMULATOR_BIN or ANDROID_SDK_ROOT/ANDROID_HOME."
+fi
+./scripts/build_local.sh && open -na "$(pwd)/DerivedData/Build/Products/Debug/APKInstaller.app"
 '''

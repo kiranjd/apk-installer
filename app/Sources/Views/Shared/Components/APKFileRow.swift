@@ -460,7 +460,7 @@ struct APKFileRow: View {
 }
 
 #Preview {
-    let exampleFile = APKFile(name: "ExampleApp.apk", path: "/Users/test/app.apk", size: 12345678, modificationDate: .now)
+    let exampleFile = APKFile(name: "ExampleApp.apk", path: "/path/to/app.apk", size: 12345678, modificationDate: .now)
     
     let statusViewModel = StatusViewModel()
     let installState = InstallAPKState()

@@ -128,7 +128,7 @@ struct ConfigView: View {
 
                     if showADBOverrideEditor {
                         HStack(spacing: 8) {
-                            TextField("/opt/homebrew/bin/adb", text: $state.adbPath)
+                            TextField("adb or /path/to/adb", text: $state.adbPath)
                                 .textFieldStyle(.roundedBorder)
                                 .font(.system(.caption, design: .monospaced))
 

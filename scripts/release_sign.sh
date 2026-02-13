@@ -4,6 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+SCRIPT_NAME="$(basename -- "$0")"
 PROJECT_PATH="${PROJECT_PATH:-${REPO_ROOT}/APKInstaller.xcodeproj}"
 SCHEME_NAME="${SCHEME_NAME:-APKInstaller}"
 APP_NAME="${APP_NAME:-APKInstaller}"
@@ -16,18 +17,16 @@ DEVELOPER_TEAM_ID="${DEVELOPER_TEAM_ID:-}"
 NOTARIZE="${NOTARIZE:-0}"
 NOTARYTOOL_PROFILE="${NOTARYTOOL_PROFILE:-textify-notary}"
 DMG_SIGN_IDENTITY="${DMG_SIGN_IDENTITY:-}"
-PREFER_VIBECODE_CERT="${PREFER_VIBECODE_CERT:-1}"
-VIBECODE_PACKAGE_SCRIPT="${VIBECODE_PACKAGE_SCRIPT:-${REPO_ROOT}/../vibe-code/scripts/package_dmg.sh}"
+PREFERRED_DMG_SIGN_IDENTITY="${PREFERRED_DMG_SIGN_IDENTITY:-}"
 
 usage() {
   cat <<USAGE
-Usage: $(basename "$0")
+Usage: ${SCRIPT_NAME}
 
 Environment:
   DEVELOPER_TEAM_ID   Team used for xcode archive export (auto-detected when unset)
   DMG_SIGN_IDENTITY   Optional exact Developer ID identity for DMG signing
-  PREFER_VIBECODE_CERT 1 to prefer vibe-code DMG identity when available (default: ${PREFER_VIBECODE_CERT})
-  VIBECODE_PACKAGE_SCRIPT Path to vibe-code package_dmg.sh for cert extraction
+  PREFERRED_DMG_SIGN_IDENTITY Optional fallback identity name when DMG_SIGN_IDENTITY is unset
   NOTARIZE            1 to notarize DMG, 0 to skip (default: ${NOTARIZE})
   NOTARYTOOL_PROFILE  Notarytool keychain profile (default: ${NOTARYTOOL_PROFILE})
 USAGE
@@ -43,13 +42,6 @@ if [[ ! -d "${PROJECT_PATH}" ]]; then
   exit 1
 fi
 
-read_vibecode_identity() {
-  local script_path="$1"
-  [[ -f "${script_path}" ]] || return 1
-
-  sed -nE 's/^DMG_SIGN_IDENTITY="\$\{DMG_SIGN_IDENTITY:-(.+)\}"$/\1/p' "${script_path}" | head -n 1
-}
-
 available_developer_ids() {
   security find-identity -v -p codesigning | awk -F\" '/Developer ID Application/ {print $2}'
 }
@@ -63,16 +55,22 @@ is_identity_available() {
 
 DEVELOPER_IDS="$(available_developer_ids || true)"
 
-if [[ -z "${DMG_SIGN_IDENTITY}" && "${PREFER_VIBECODE_CERT}" == "1" ]]; then
-  VIBECODE_IDENTITY="$(read_vibecode_identity "${VIBECODE_PACKAGE_SCRIPT}" || true)"
-  if is_identity_available "${VIBECODE_IDENTITY}" "${DEVELOPER_IDS}"; then
-    DMG_SIGN_IDENTITY="${VIBECODE_IDENTITY}"
+if [[ -z "${DMG_SIGN_IDENTITY}" && -n "${PREFERRED_DMG_SIGN_IDENTITY}" ]]; then
+  if is_identity_available "${PREFERRED_DMG_SIGN_IDENTITY}" "${DEVELOPER_IDS}"; then
+    DMG_SIGN_IDENTITY="${PREFERRED_DMG_SIGN_IDENTITY}"
+  else
+    echo "Preferred DMG identity is not available in keychain: ${PREFERRED_DMG_SIGN_IDENTITY}" >&2
   fi
 fi
 
 # Fallback: first available Developer ID Application cert in keychain.
 if [[ -z "${DMG_SIGN_IDENTITY}" ]]; then
   DMG_SIGN_IDENTITY="$(echo "${DEVELOPER_IDS}" | head -n 1)"
+fi
+
+if [[ -n "${DMG_SIGN_IDENTITY}" ]] && ! is_identity_available "${DMG_SIGN_IDENTITY}" "${DEVELOPER_IDS}"; then
+  echo "DMG_SIGN_IDENTITY is not available in keychain: ${DMG_SIGN_IDENTITY}" >&2
+  exit 1
 fi
 
 if [[ -z "${DEVELOPER_TEAM_ID}" && -n "${DMG_SIGN_IDENTITY}" ]]; then

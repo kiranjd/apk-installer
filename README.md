@@ -69,3 +69,8 @@ By default, it uses `DMG_SIGN_IDENTITY` when set, otherwise falls back to the fi
   - Confirm `adb devices` shows a connected `device`.
 - Folder permission errors:
   - Re-select the APK folder in the app to refresh bookmark permissions.
+
+## Contributing
+
+- Contribution guide: `CONTRIBUTING.md`
+- Code of conduct: `CODE_OF_CONDUCT.md`
