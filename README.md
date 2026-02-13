@@ -6,7 +6,18 @@ Latest installable release: [GitHub Releases](https://github.com/kiranjd/apk-ins
 
 ## Demo Video
 
-https://github.com/kiranjd/apk-installer/releases/download/media-2026-02-12/apk-installer.mp4
+<video
+  src="https://github.com/kiranjd/apk-installer/releases/download/media-2026-02-12/apk-installer.mp4"
+  controls
+  muted
+  playsinline
+  preload="metadata"
+>
+  Your browser does not support embedded video.
+  <a href="https://github.com/kiranjd/apk-installer/releases/download/media-2026-02-12/apk-installer.mp4">Download the demo video</a>.
+</video>
+
+Direct link: [Download demo video](https://github.com/kiranjd/apk-installer/releases/download/media-2026-02-12/apk-installer.mp4)
 
 Tracking issue: [#1](https://github.com/kiranjd/apk-installer/issues/1)
 
@@ -57,12 +68,11 @@ Useful variables:
 
 - `DEVELOPER_TEAM_ID`
 - `DMG_SIGN_IDENTITY`
-- `PREFER_VIBECODE_CERT=1` (default)
-- `VIBECODE_PACKAGE_SCRIPT` (defaults to `../vibe-code/scripts/package_dmg.sh`)
+- `PREFERRED_DMG_SIGN_IDENTITY` (used only when `DMG_SIGN_IDENTITY` is unset)
 - `NOTARIZE=1`
 - `NOTARYTOOL_PROFILE`
 
-By default, it prefers the `DMG_SIGN_IDENTITY` configured in `vibe-code` (if that cert exists in your keychain), then falls back to the first available `Developer ID Application` identity.
+By default, it uses `DMG_SIGN_IDENTITY` when set, otherwise falls back to the first available `Developer ID Application` identity in your keychain.
 
 ## Troubleshooting
 

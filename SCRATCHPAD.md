@@ -41,3 +41,6 @@
 - Core-path guardrail: never preflight every adb command with `adb start-server`; execute target adb command directly to avoid daemon-bootstrap hangs blocking install/update.
 
 - Test guardrail: set `APKINSTALLER_SKIP_POST_INSTALL_LAUNCH=1` in integration/e2e tests to avoid detached best-effort launch leaking across tests.
+- Docs preference: README "Demo Video" should render as an embedded player with a direct-link fallback, not a bare URL.
+
+- Contributor portability guardrail: avoid committed absolute user-home paths or sibling-repo defaults (for example `../vibe-code`) in scripts/config; use env-driven or repo-local defaults.
